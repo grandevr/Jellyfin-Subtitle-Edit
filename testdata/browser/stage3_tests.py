@@ -78,6 +78,17 @@ def cues(item_id, index):
 
 # ---- browser helpers -----------------------------------------------------------------------------------------------
 
+def dump_failure(page, name):
+    """Screenshot, panel status and debugState of a failed scenario's page; never raises."""
+    try:
+        shot(page, name + "-failed")
+        state = page.evaluate("() => ({ status: (document.querySelector('.sqe-panel .sqe-status') || {}).textContent || null,"
+                              " debug: window.SubtitleQuickEdit && window.SubtitleQuickEdit.debugState() })")
+        print("     state at failure: " + json.dumps(state), flush=True)
+    except Exception:
+        pass
+
+
 def shot(page, name):
     if SHOTS:
         page.screenshot(path=os.path.join(SHOTS, name + ".png"))
@@ -454,6 +465,9 @@ def admin_saving(browser, pages):
                   [c for c in pafter["cues"] if c["index"] == pcue["index"]][0]["text"] == pcue["text"] + " zażółć gęślą jaźń",
                   "encoding %s -> %s" % (original_pl["encoding"], pafter["encoding"]))
         shot(page, "3e-saving")
+    except Exception:
+        dump_failure(page, "admin_saving")  # here, because the finally below closes the page
+        raise
     finally:
         restore_texts(movie, en, original_en["cues"])
         if original_pl is not None:
@@ -510,13 +524,8 @@ with sync_playwright() as p:
             scenario(browser, pages)
         except Exception as e:  # report and carry on with the next scenario
             check(scenario.__name__ + " ran to the end", False, type(e).__name__ + ": " + str(e).splitlines()[0][:200])
-            if pages:
-                try:
-                    shot(pages[-1], scenario.__name__ + "-failed")
-                    state = pages[-1].evaluate("() => window.SubtitleQuickEdit && window.SubtitleQuickEdit.debugState()")
-                    print("     state at failure: " + json.dumps(state), flush=True)
-                except Exception:
-                    pass
+            if pages and not pages[-1].is_closed():
+                dump_failure(pages[-1], scenario.__name__)
             for page in pages:
                 try:
                     page.context.close()

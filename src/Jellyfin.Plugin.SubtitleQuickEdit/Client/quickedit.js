@@ -89,7 +89,8 @@
     }
 
     /** POST JSON as the logged-in user; resolves with the parsed answer (or null), rejects with the Response. */
-    function apiPost(path, body, params) {
+    /** POSTs body as JSON. Resolves with the parsed reply, or with undefined when noReply (the server answers 204). */
+    function apiPost(path, body, params, noReply) {
         const client = window.ApiClient;
         if (!client) {
             return Promise.reject(new Error('Not connected to the server.'));
@@ -100,7 +101,8 @@
             url: client.getUrl(path, params),
             data: body === undefined ? undefined : JSON.stringify(body),
             contentType: 'application/json',
-            dataType: body === undefined ? undefined : 'json',
+            // ApiClient parses the reply whenever dataType is 'json', and an empty 204 reply then fails to parse.
+            dataType: body === undefined || noReply ? undefined : 'json',
         });
     }
 
@@ -922,7 +924,7 @@
         showStatus('Reloading subtitles\u2026');
         function command(index) {
             return apiPost('Sessions/' + encodeURIComponent(session.id) + '/Command',
-                { Name: 'SetSubtitleStreamIndex', Arguments: { Index: String(index) } });
+                { Name: 'SetSubtitleStreamIndex', Arguments: { Index: String(index) } }, undefined, true);
         }
 
         refetchCues(target).then(function (loaded) {
@@ -950,7 +952,14 @@
 
                     return wait();
                 }, function () {
-                    return false;
+                    // A command failed; the subtitle may have been switched off already, so ask for it once more.
+                    return command(target.streamIndex).then(function () {
+                        return delay(RELOAD_OFF_MS);
+                    }, function () {
+                        return null;
+                    }).then(function () {
+                        return false;
+                    });
                 })
                 : Promise.resolve(false);
             return viaServer.then(function (shown) {

@@ -51,7 +51,8 @@ setTimeout(() => {
       if (o.url === 'Sessions/s1/Command' && body.Name === 'SetSubtitleStreamIndex') {
         const track = Array.from(document.querySelector('video').textTracks).find((t) => t.label === 'manualTrack');
         if (body.Arguments.Index === '-1') { track.mode = 'disabled'; } else { track.mode = 'showing'; setTimeout(() => fillTrack(track), 300); }
-        return Promise.resolve(null);
+        // The real server carries the command out and answers 204 with no body, which ApiClient fails to parse as JSON.
+        return o.dataType === 'json' ? Promise.reject(new SyntaxError('Unexpected end of JSON input')) : Promise.resolve(undefined);
       }
       return refused(404, { message: 'no route' });
     } };
