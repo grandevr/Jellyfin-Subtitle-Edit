@@ -314,7 +314,11 @@ public class SubtitleQuickEditController : ControllerBase
                     edits.Add(new SrtAddCue(dto.ClientId, dto.StartMs.Value, dto.EndMs.Value, dto.Text));
                     break;
                 case "add":
-                    invalid = ErrorObject(StatusCodes.Status400BadRequest, "InvalidEdit", at + "an added line needs clientId, startMs, endMs and text.");
+                    invalid = ErrorObject(
+                        StatusCodes.Status400BadRequest,
+                        "InvalidEdit",
+                        at + "an added line needs clientId, startMs, endMs and text.",
+                        clientId: string.IsNullOrEmpty(dto.ClientId) ? null : dto.ClientId);
                     return null;
                 default:
                     invalid = ErrorObject(StatusCodes.Status400BadRequest, "InvalidEdit", at + "type must be 'edit' or 'add'.");
@@ -331,15 +335,15 @@ public class SubtitleQuickEditController : ControllerBase
         return edits;
     }
 
-    private static ObjectResult ErrorObject(int status, string code, string message, int? cueIndex = null, string? currentHash = null) =>
-        new(new ErrorResponse { Code = code, Message = message, CueIndex = cueIndex, CurrentHash = currentHash }) { StatusCode = status };
+    private static ObjectResult ErrorObject(int status, string code, string message, int? cueIndex = null, string? currentHash = null, string? clientId = null) =>
+        new(new ErrorResponse { Code = code, Message = message, CueIndex = cueIndex, CurrentHash = currentHash, ClientId = clientId }) { StatusCode = status };
 
-    private ObjectResult Error(int status, string code, string message, int? cueIndex = null, string? currentHash = null) =>
-        ErrorObject(status, code, message, cueIndex, currentHash);
+    private ObjectResult Error(int status, string code, string message, int? cueIndex = null, string? currentHash = null, string? clientId = null) =>
+        ErrorObject(status, code, message, cueIndex, currentHash, clientId);
 
     private ObjectResult EditError(SrtEditException ex) => ex.Error switch
     {
-        SrtEditError.InvalidEdit => Error(StatusCodes.Status400BadRequest, "InvalidEdit", ex.Message, ex.CuePosition),
+        SrtEditError.InvalidEdit => Error(StatusCodes.Status400BadRequest, "InvalidEdit", ex.Message, ex.CuePosition, clientId: ex.ClientId),
         SrtEditError.CueNotFound => Error(StatusCodes.Status400BadRequest, "CueNotFound", ex.Message, ex.CuePosition),
         SrtEditError.TextMismatch => Error(StatusCodes.Status409Conflict, "TextMismatch", ex.Message, ex.CuePosition),
         SrtEditError.Unrepresentable => Error(StatusCodes.Status422UnprocessableEntity, "Unrepresentable", ex.Message, ex.CuePosition),

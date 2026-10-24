@@ -30,4 +30,10 @@ public class ErrorResponse
     /// </summary>
     [JsonPropertyName("currentHash")]
     public string? CurrentHash { get; set; }
+
+    /// <summary>
+    /// Gets or sets, for an invalid added line, the client id of that line (null when the error is not about one).
+    /// </summary>
+    [JsonPropertyName("clientId")]
+    public string? ClientId { get; set; }
 }

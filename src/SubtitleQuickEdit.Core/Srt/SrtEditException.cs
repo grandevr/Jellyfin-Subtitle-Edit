@@ -50,4 +50,9 @@ public sealed class SrtEditException : Exception
     /// Gets the 1-based cue position the problem concerns, if any.
     /// </summary>
     public int? CuePosition { get; }
+
+    /// <summary>
+    /// Gets the client id of the added line the problem concerns, if it concerns one.
+    /// </summary>
+    public string? ClientId { get; init; }
 }

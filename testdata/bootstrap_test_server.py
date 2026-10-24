@@ -3,6 +3,8 @@
 
 Usage: bootstrap_test_server.py <base-url> <secrets-dir>
 Writes <secrets-dir>/admin.pw and <secrets-dir>/token (mode 600). Prints neither.
+Creates two libraries: TestTV on /data/TestShow and TestWebm (movies) on /data/TestWebm. Both folders should exist before
+this runs (testdata/reset_fixtures.sh creates the first; the second holds the VP9/Opus copies for browser tests).
 Test server only: never point this at the live Jellyfin.
 """
 import json
@@ -55,6 +57,11 @@ token = auth["AccessToken"]
 write_secret("token", token)
 print("auth", st, "admin" if auth["User"]["Policy"]["IsAdministrator"] else "NOT admin")
 
+# The libraries must not overlap: /data/TestShow holds the episodes the API tests count, /data/TestWebm the VP9/Opus
+# copies that browser tests play (a TV library rooted at /data would pick the copies up as episodes).
 st, _ = call("POST", "/Library/VirtualFolders?name=TestTV&collectionType=tvshows&refreshLibrary=true",
-             {"LibraryOptions": {"PathInfos": [{"Path": "/data"}]}}, token)
-print("library", st)
+             {"LibraryOptions": {"PathInfos": [{"Path": "/data/TestShow"}]}}, token)
+print("library TestTV", st)
+st, _ = call("POST", "/Library/VirtualFolders?name=TestWebm&collectionType=movies&refreshLibrary=true",
+             {"LibraryOptions": {"PathInfos": [{"Path": "/data/TestWebm"}]}}, token)
+print("library TestWebm", st)
