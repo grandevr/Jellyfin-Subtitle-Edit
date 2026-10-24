@@ -453,6 +453,20 @@ def admin_saving(browser, pages):
         check("reloading with unsaved edits asks first", "beforeunload" in dialogs, repr(dialogs))
         page.locator(".sqe-undo").first.click()
 
+        # Revert to original: the file goes back to its bytes from before this session, and the player shows it.
+        page.locator(".sqe-revert").click()
+        wait_status("Reverted to the original", 25)
+        page.wait_for_timeout(1000)  # the player fetches the track again a moment after it is switched back on
+        shown = page.evaluate("""(t) => { const v = document.querySelector('video.htmlvideoplayer');
+            const tr = Array.from(v.textTracks).find((x) => x.label === 'manualTrack');
+            const c = tr && tr.cues ? Array.from(tr.cues).find((x) => x.startTime <= t && t < x.endTime) : null;
+            const custom = document.querySelector('.videoSubtitles .videoSubtitlesInner');
+            return c ? c.text : (custom ? custom.textContent : null); }""", (cue["start"] + cue["end"]) / 2000.0)
+        check("Revert to original puts back the file's bytes from before the session",
+              cues_full(movie, en)["hash"] == original_en["hash"] and "confirm" in dialogs and not rows(),
+              "rows %r, dialogs %r" % (rows(), dialogs))
+        check("after Revert the player no longer shows the saved edit", shown is not None and "(saved)" not in shown, repr(shown))
+
         # A Windows-1250 file with Polish characters round-trips.
         if pl is None:
             check("TestWebm 01 has a Polish .srt", False, "none found")

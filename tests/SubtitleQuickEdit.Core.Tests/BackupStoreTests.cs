@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using SubtitleQuickEdit.Core.Storage;
 using Xunit;
 
@@ -162,5 +163,47 @@ public class BackupStoreTests
         SubtitleWriteException ex = Assert.Throws<SubtitleWriteException>(() => store.BeforeSave(Item, 1, "/m/a.srt", Content.Srt("x")));
 
         Assert.Equal(SubtitleWriteError.Io, ex.Error);
+    }
+
+    [Fact]
+    public void Restore_points_are_kept_whatever_the_mode_and_only_the_newest_three()
+    {
+        using var dir = new TempDir();
+        string folder = Path.Combine(dir.Root, "bk");
+        var store = new BackupStore(folder, BackupMode.OriginalOnly, 3);
+        for (int i = 1; i <= 5; i++)
+        {
+            string path = store.KeepRestorePoint(Item, 2, "/m/a.srt", Content.Srt("r" + i));
+            Assert.EndsWith("_restore.srt", path, StringComparison.Ordinal);
+            Thread.Sleep(5); // distinct timestamps, so "newest" is well defined
+        }
+
+        string[] files = Directory.GetFiles(folder);
+        Assert.Equal(3, files.Length);
+        Assert.All(files, f => Assert.EndsWith("_restore.srt", f, StringComparison.Ordinal));
+        Assert.NotNull(store.FindByHash(Item, 2, "/m/a.srt", Content.Hash(Content.Srt("r5"))));
+        Assert.NotNull(store.FindByHash(Item, 2, "/m/a.srt", Content.Hash(Content.Srt("r3"))));
+        Assert.Null(store.FindByHash(Item, 2, "/m/a.srt", Content.Hash(Content.Srt("r2"))));
+    }
+
+    [Fact]
+    public void Find_by_hash_finds_originals_saves_and_restore_points_of_that_subtitle_only()
+    {
+        using var dir = new TempDir();
+        var store = new BackupStore(Path.Combine(dir.Root, "bk"), BackupMode.OriginalPlusLastN, 3);
+        byte[] original = Content.Srt("o");
+        byte[] earlier = Content.Srt("e");
+        byte[] point = Content.Srt("p");
+        store.BeforeSave(Item, 1, "/m/a.srt", original);
+        store.BeforeSave(Item, 1, "/m/a.srt", earlier);
+        store.KeepRestorePoint(Item, 1, "/m/a.srt", point);
+        store.BeforeSave(Item, 1, "/m/b.srt", Content.Srt("other file"));
+
+        Assert.Equal(original, store.FindByHash(Item, 1, "/m/a.srt", Content.Hash(original)));
+        Assert.Equal(earlier, store.FindByHash(Item, 1, "/m/a.srt", " " + Content.Hash(earlier).ToUpperInvariant()));
+        Assert.Equal(point, store.FindByHash(Item, 1, "/m/a.srt", Content.Hash(point)));
+        Assert.Null(store.FindByHash(Item, 1, "/m/a.srt", Content.Hash(Content.Srt("other file"))));
+        Assert.Null(store.FindByHash(Item, 11, "/m/a.srt", Content.Hash(original)));
+        Assert.Null(new BackupStore(Path.Combine(dir.Root, "none"), BackupMode.OriginalOnly, 3).FindByHash(Item, 1, "/m/a.srt", Content.Hash(original)));
     }
 }

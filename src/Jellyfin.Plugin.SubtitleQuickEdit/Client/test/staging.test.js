@@ -396,3 +396,16 @@ test('dropSaved forgets saved rows and keeps staged and failed ones', () => {
     assert.deepEqual(m.rows.map((r) => r.status), ['staged', 'failed']);
     assert.equal(m.dropSaved(), 0);
 });
+
+test('clear forgets every row, saved ones included', () => {
+    const m = new L.StagingModel();
+    m.setCues([{ index: 1, start: 0, end: 1000, text: 'A' }, { index: 2, start: 2000, end: 3000, text: 'B' }], 'h0');
+    m.stageEdit({ index: 1, start: 0, end: 1000, text: 'A' }, 'A2');
+    const prepared = m.prepareSave();
+    m.applySaveSuccess(prepared.rowIds, { hash: 'h1', addedCues: {} });
+    m.stageEdit({ index: 2, start: 2000, end: 3000, text: 'B' }, 'B2');
+    assert.equal(m.clear(), 2);
+    assert.deepEqual(m.snapshot(), []);
+    assert.equal(m.hasUnsaved(), false);
+    assert.equal(m.baseHash, 'h1');
+});

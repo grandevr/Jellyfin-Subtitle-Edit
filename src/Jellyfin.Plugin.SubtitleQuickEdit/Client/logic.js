@@ -695,6 +695,13 @@
             return before - this.rows.length;
         }
 
+        /** Forgets every row, saved or not (after "Revert to original"). Returns how many. */
+        clear() {
+            const count = this.rows.length;
+            this.rows = [];
+            return count;
+        }
+
         /** The rows worth keeping across a page reload: everything not saved, as plain data. */
         serialize() {
             return {

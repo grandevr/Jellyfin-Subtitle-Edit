@@ -164,6 +164,14 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
     flex: 1;
 }
 
+.sqe-actions {
+    flex-wrap: wrap;
+}
+
+.sqe-revert {
+    margin-left: auto;
+}
+
 .sqe-button {
     padding: 8px 14px;
     border: 1px solid var(--sqe-line);

@@ -32,7 +32,10 @@ function showCustom() {
 const FILE_KEY = 'fake-file';
 const initial = { hash: 'h0', n: 0, cues: [{ index: 1, start: 0, end: 2000, text: 'Hello there' }, { index: 2, start: 3000, end: 4000, text: 'Two' }] };
 function file() { return JSON.parse(sessionStorage.getItem(FILE_KEY) || JSON.stringify(initial)); }
-function store(f) { sessionStorage.setItem(FILE_KEY, JSON.stringify(f)); }
+function store(f) { sessionStorage.setItem(FILE_KEY, JSON.stringify(f)); keep(f); }
+// Every version the "file" has had, by hash: the plugin's backups, for Restore.
+function versions() { const v = JSON.parse(sessionStorage.getItem('fake-versions') || '{}'); v[initial.hash] = v[initial.hash] || copy(initial.cues); return v; }
+function keep(f) { const v = versions(); v[f.hash] = copy(f.cues); sessionStorage.setItem('fake-versions', JSON.stringify(v)); }
 function copy(x) { return JSON.parse(JSON.stringify(x)); }
 function refused(status, body) { return Promise.reject({ status: status, json: () => Promise.resolve(body) }); }
 window.fakeEditsSent = [];
@@ -71,6 +74,14 @@ setTimeout(() => {
         f.n++; f.hash = 'h' + f.n; store(f);
         return Promise.resolve({ hash: f.hash, savedCueIndexes: body.edits.filter((e) => e.type === 'edit').map((e) => e.cueIndex),
           addedCues: added, writeMethod: 'Rename' });
+      }
+      if (o.url === 'SubtitleQuickEdit/Items/abc/Subtitles/0/Restore') {
+        window.fakeRestoreSent = body;
+        const f = file(); const kept = versions()[body.targetHash];
+        if (body.baseHash !== f.hash) { return refused(409, { code: 'FileChanged', message: 'changed', currentHash: f.hash }); }
+        if (!kept) { return refused(404, { code: 'RestorePointNotFound', message: 'none' }); }
+        f.cues = kept; f.n++; f.hash = body.targetHash; store(f);
+        return Promise.resolve({ hash: f.hash, restored: true, writeMethod: 'Rename' });
       }
       if (o.url === 'Sessions/s1/Command' && body.Name === 'SetSubtitleStreamIndex') {
         if (CUSTOM) {
@@ -168,6 +179,7 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   await p.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Saved') === 0, null, { timeout: 5000 });
   const sent = await p.evaluate(() => window.fakeEditsSent);
   const saved = await rows();
+  checks['the first save of the session asks the server to keep a restore point'] = sent[0].keepRestorePoint === true;
   checks['Ctrl+S saves the staged change in one request'] = sent.length === 1 && sent[0].baseHash === 'h0' &&
     sent[0].edits.length === 1 && sent[0].edits[0].oldText === 'Hello there' && sent[0].edits[0].newText === 'Hello draft';
   checks['the saved row is marked saved'] = saved.length === 1 && saved[0].endsWith('|saved');
@@ -253,6 +265,7 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   await p.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Saved') === 0, null, { timeout: 5000 });
   const lastSent = await p.evaluate(() => window.fakeEditsSent[window.fakeEditsSent.length - 1]);
   const fileNow = await p.evaluate(() => JSON.parse(sessionStorage.getItem('fake-file')).cues.map((c) => c.index + ':' + c.text).join('|'));
+  checks['later saves do not keep another restore point'] = lastSent.keepRestorePoint === false;
   checks['Save sends the new line with its clientId and times'] = lastSent.edits.length === 1 && lastSent.edits[0].type === 'add' &&
     lastSent.edits[0].startMs === 100 && lastSent.edits[0].endMs === 2500 && typeof lastSent.edits[0].clientId === 'string';
   checks['the saved line lands in time order and the row shows its new number'] =
@@ -276,6 +289,26 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   info.phone = phone;
   await p.click('.sqe-cancel');
   await p.setViewportSize({ width: 1280, height: 720 });
+
+  // Revert to original: puts back the file as this tab first loaded it, drops every change, reloads the subtitles.
+  const revertShown = () => p.$eval('.sqe-revert', (e) => !e.hidden);
+  checks['Revert to original is offered once the file differs from the original'] = await revertShown();
+  await p.fill('.sqe-cue-text', 'Throwaway');
+  await p.click('.sqe-apply');
+  await p.click('.sqe-revert');
+  await p.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Reverted to the original') === 0, null, { timeout: 12000 });
+  const reverted = await p.evaluate(() => ({ file: JSON.parse(sessionStorage.getItem('fake-file')), sent: window.fakeRestoreSent }));
+  checks['Revert asks to restore the first hash of the session'] = reverted.sent.targetHash === 'h0' && reverted.sent.baseHash === lastSent.baseHash.replace(/^h(\d+)$/, (m, n) => 'h' + (Number(n) + 1));
+  checks['Revert puts the original lines back in the file'] = reverted.file.hash === 'h0' &&
+    reverted.file.cues.map((c) => c.text).join('|') === 'Hello there|Two';
+  checks['Revert drops every change, saved or not, and hides itself'] = (await rows()).length === 0 &&
+    (await p.$eval('.sqe-changes', (e) => e.hidden)) && !(await revertShown());
+  // The player fetches the track again on its own a moment after it is switched back on.
+  await p.waitForFunction(() => Array.from(Array.from(document.querySelector('video').textTracks).find((t) => t.label === 'manualTrack').cues)
+    .map((c) => c.text.replace(/\u200e/g, '')).join('|') === 'Hello there|Two', null, { timeout: 3000 }).catch(() => null);
+  const revertedTrack = (await trackTexts()).replace(/\u200e/g, '');
+  checks['after Revert the player shows the original lines'] = revertedTrack === 'Hello there|Two';
+  info.revertedTrack = revertedTrack;
 
   await p.focus('.sqe-cue-text');
   await p.keyboard.press('Escape');

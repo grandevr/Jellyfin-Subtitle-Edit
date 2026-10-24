@@ -408,6 +408,45 @@
         return window.localStorage;
     });
 
+    // ---- the session's original: what "Revert to original" puts back -------------------------------------------------
+    // The hash of each track as it was the first time this browser tab loaded it. Kept in sessionStorage, so it lasts
+    // through page reloads but not into a new tab; held in memory too, for when storage is blocked.
+
+    const baselines = {};
+
+    function baselineKey(target) {
+        return 'sqe-baseline:' + state.userId + ':' + target.itemId + ':' + target.streamIndex;
+    }
+
+    function baselineHash(target) {
+        const key = baselineKey(target);
+        try {
+            const stored = window.sessionStorage.getItem(key);
+            if (stored) {
+                baselines[key] = stored;
+            }
+        } catch (e) {
+            // storage blocked: the copy in memory is used
+        }
+
+        return baselines[key] || null;
+    }
+
+    /** Records hash as the track's original unless one is already known for this session. */
+    function rememberBaseline(target, hash) {
+        if (!hash || baselineHash(target)) {
+            return;
+        }
+
+        const key = baselineKey(target);
+        baselines[key] = hash;
+        try {
+            window.sessionStorage.setItem(key, hash);
+        } catch (e) {
+            // storage blocked or full: the copy in memory lasts until the page is reloaded
+        }
+    }
+
     function persist(target, model) {
         drafts.save(state.userId, target.itemId, target.streamIndex, model.serialize());
         refreshOverlay();
@@ -611,6 +650,7 @@
             .then(function (body) {
                 const loaded = { hash: body.hash, encoding: body.encoding, cues: body.cues || [] };
                 state.cues[key] = loaded;
+                rememberBaseline(target, loaded.hash);
                 return loaded;
             });
     }
@@ -697,6 +737,10 @@
         actions.appendChild(button('sqe-reload', 'Reload subtitles', 'Make the player show the saved file', function () {
             reloadSubtitles();
         }));
+        actions.appendChild(button('sqe-revert', 'Revert to original',
+            'Put the file back as it was before your changes this session, and drop unsaved changes', function () {
+                revertToOriginal();
+            }));
         const changes = el('section', 'sqe-changes');
         const changesTitle = el('h3', 'sqe-changes-title', 'Changes this session');
         const list = el('ol', 'sqe-change-list');
@@ -1185,6 +1229,19 @@
         panel.actions.querySelector('.sqe-save').disabled = panel.busy || !rows.some(function (r) {
             return r.status === 'staged';
         });
+        const revert = panel.actions.querySelector('.sqe-revert');
+        revert.hidden = !canRevert(panel);
+        revert.disabled = panel.busy;
+    }
+
+    /** True when there is something to revert: unsaved changes, or a file that differs from the session's original. */
+    function canRevert(panel) {
+        if (!panel.model || !panel.loaded) {
+            return false;
+        }
+
+        const baseline = baselineHash(panel.target);
+        return panel.model.hasUnsaved() || Boolean(baseline && baseline !== panel.loaded.hash);
     }
 
     /** Fetches the cues again (after a save or a conflict) and makes them the panel's. */
@@ -1249,6 +1306,8 @@
             return;
         }
 
+        // The first save of the session keeps a copy of the file as it was, for Revert to original.
+        prepared.request.keepRestorePoint = prepared.request.baseHash === baselineHash(target);
         setBusy(true);
         showStatus('Saving\u2026');
         apiPost('SubtitleQuickEdit/Items/' + encodeURIComponent(target.itemId) + '/Subtitles/' + target.streamIndex + '/Edits',
@@ -1359,7 +1418,7 @@
      * again (it then fetches the track again); if the player's track still differs after a few seconds, the cues are
      * put into the track directly. Playback position and pause state are kept.
      */
-    function reloadSubtitles() {
+    function reloadSubtitles(doneNote) {
         const panel = state.panel;
         const session = state.session;
         if (!panel || !panel.target || panel.busy) {
@@ -1436,7 +1495,7 @@
                 refreshOverlay(); // staged changes that are not saved yet stay on screen
                 if (state.panel === panel) {
                     setBusy(false);
-                    reshow('Subtitles reloaded.');
+                    reshow(doneNote || 'Subtitles reloaded.');
                 }
             });
         }).catch(function (err) {
@@ -1444,6 +1503,96 @@
                 setBusy(false);
                 return describeError(err).then(function (message) {
                     showStatus('Could not reload the subtitles: ' + message, true);
+                });
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Puts the file back as it was the first time this tab loaded it (the server keeps that copy at the session's first
+     * save), drops every change in the list, and reloads the player's subtitles. With nothing saved yet, only the
+     * unsaved changes are dropped.
+     */
+    function revertToOriginal() {
+        const panel = state.panel;
+        if (!panel || !panel.model || panel.busy) {
+            return;
+        }
+
+        const target = panel.target;
+        const model = panel.model;
+        const baseline = baselineHash(target);
+        if (!baseline) {
+            showStatus('The original of this subtitle is not known in this tab, so it cannot be reverted.', true);
+            return;
+        }
+
+        if (!window.confirm('Revert this subtitle to how it was before your changes this session? ' +
+            'Unsaved changes are dropped too.')) {
+            return;
+        }
+
+        stopPreview();
+        setBusy(true);
+        showStatus('Reverting\u2026');
+        function dropChanges(loaded) {
+            const dropped = model.clear();
+            model.setCues(loaded.cues, loaded.hash);
+            persist(target, model);
+            return dropped;
+        }
+
+        refetchCues(target).then(function (current) {
+            if (current.hash === baseline) {
+                const dropped = dropChanges(current);
+                if (state.panel === panel) {
+                    setBusy(false);
+                    reshow(dropped > 0 ? 'Dropped the unsaved changes. The file was not changed.' : 'The file is already the original.');
+                }
+
+                return null;
+            }
+
+            return apiPost('SubtitleQuickEdit/Items/' + encodeURIComponent(target.itemId) + '/Subtitles/' + target.streamIndex + '/Restore',
+                { baseHash: current.hash, targetHash: baseline }).then(function () {
+                return refetchCues(target);
+            }).then(function (loaded) {
+                dropChanges(loaded);
+                state.showSavedText = true;
+                if (state.panel === panel) {
+                    setBusy(false);
+                    reloadSubtitles('Reverted to the original and reloaded the subtitles.');
+                }
+
+                return null;
+            }, function (err) {
+                return errorDetails(err).then(function (details) {
+                    if (state.panel !== panel) {
+                        return null;
+                    }
+
+                    setBusy(false);
+                    reshow();
+                    if (details.status === 404 && details.body.code === 'RestorePointNotFound') {
+                        showStatus('No copy of the original was kept for this subtitle, so nothing was changed.', true);
+                    } else if (details.status === 409) {
+                        return refetchCues(target).then(function () {
+                            showStatus('The file changed on disk just now, so nothing was reverted. Try again.', true);
+                        });
+                    } else {
+                        showStatus('Nothing was reverted: ' + ((details.body && details.body.message) || 'the request failed.'), true);
+                    }
+
+                    return null;
+                });
+            });
+        }).catch(function (err) {
+            if (state.panel === panel) {
+                setBusy(false);
+                return describeError(err).then(function (message) {
+                    showStatus('Could not revert: ' + message, true);
                 });
             }
 

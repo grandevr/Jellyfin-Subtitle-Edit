@@ -12,10 +12,12 @@ namespace SubtitleQuickEdit.Core.Editing;
 /// <param name="BaseHash">SHA-256 (hex) of the file as the client saw it.</param>
 /// <param name="Edits">The edits.</param>
 /// <param name="RuntimeMs">The item's runtime in milliseconds, or null when unknown.</param>
+/// <param name="KeepRestorePoint">Whether to keep the content from before this save as a restore point (the first save of an editing session).</param>
 public sealed record SaveRequest(
     string ItemId,
     int StreamIndex,
     string Path,
     string BaseHash,
     IReadOnlyList<SrtEdit> Edits,
-    long? RuntimeMs);
+    long? RuntimeMs,
+    bool KeepRestorePoint = false);
