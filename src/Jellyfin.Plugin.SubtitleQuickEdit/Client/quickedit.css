@@ -271,3 +271,61 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
     right: 8px;
     padding: 4px 10px;
 }
+
+/* The new-line form. */
+.sqe-new-line {
+    margin-bottom: 12px;
+}
+
+.sqe-field {
+    margin-bottom: 10px;
+}
+
+.sqe-label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--sqe-muted);
+    font-size: 0.9em;
+}
+
+.sqe-time-row {
+    display: flex;
+    gap: 4px;
+}
+
+.sqe-time {
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 7.5em;
+    padding: 8px 6px;
+    border: 1px solid var(--sqe-line);
+    border-radius: 6px;
+    background: var(--sqe-field);
+    color: var(--sqe-fg);
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+}
+
+.sqe-time:focus {
+    outline: 2px solid var(--sqe-accent);
+    outline-offset: 0;
+}
+
+.sqe-time-row .sqe-button {
+    flex: none;
+    padding: 8px 6px;
+    font-size: 0.85em;
+    white-space: nowrap;
+}
+
+.sqe-warning {
+    margin: 0 0 10px;
+    color: #ffd180;
+    font-size: 0.9em;
+}
+
+.sqe-form-buttons {
+    display: flex;
+    gap: 8px;
+}
