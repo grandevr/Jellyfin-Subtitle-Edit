@@ -27,6 +27,7 @@
     const RELOAD_OFF_MS = 1500; // Reload: how long the subtitle stays off before it is switched on again
     const RELOAD_CHECK_MS = 5000; // Reload: how long to wait for the player to show the saved text before the fallback
     const NUDGE_MS = 100; // the new-line form's -100 ms / +100 ms buttons
+    const SEEK_INSIDE_MS = 200; // Previous, Next and a row click seek this far into a line, so the player shows that line
     const PREVIEW_LEAD_MS = 1000; // Preview starts this long before the new line
     const LOG = '[SubtitleQuickEdit]';
 
@@ -840,10 +841,19 @@
         }
     }
 
-    /** Shows a cue: seeks to its start and shows every line on screen at that moment (overlaps included). */
+    /**
+     * A moment just inside a line: a little after its start. At the exact start the player may still show the line
+     * before (jellyfin-web's own renderer counts a line's end as on screen, and a seek can land a frame early).
+     */
+    function insideLine(start, end) {
+        return start + Math.min(SEEK_INSIDE_MS, Math.max(0, (end - start) / 2));
+    }
+
+    /** Shows a cue: seeks just inside it and shows every line on screen at that moment (overlaps included). */
     function showCue(cue) {
-        seekTo(cue.start);
-        renderCues(L.cueForTime(state.panel.loaded.cues, cue.start), '');
+        const at = insideLine(cue.start, cue.end);
+        seekTo(at);
+        renderCues(L.cueForTime(state.panel.loaded.cues, at), '');
     }
 
     function step(direction) {
@@ -1221,7 +1231,7 @@
         item.addEventListener('click', function () {
             const panel = state.panel;
             if (row.type === 'add' && row.status !== 'saved') {
-                seekTo(row.startMs);
+                seekTo(insideLine(row.startMs, row.endMs));
                 openForm(row);
                 return;
             }

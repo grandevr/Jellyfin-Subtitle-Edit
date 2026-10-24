@@ -269,12 +269,14 @@ def admin_editing(browser, pages):
 
     def at(cue):
         state = video_state(page)
-        return state["paused"] and abs(state["time"] - cue["start"] / 1000.0) < 0.06
+        # Seeks land just inside the line (up to 200 ms after its start), so the player shows that line.
+        inside = cue["start"] + min(200, (cue["end"] - cue["start"]) / 2)
+        return state["paused"] and abs(state["time"] - inside / 1000.0) < 0.06
 
     page.locator(".sqe-next").click()
     page.wait_for_timeout(400)
     nxt = all_cues[k + 1]
-    check("Next steps to the next line and seeks to its start", nxt["index"] in shown() and at(nxt),
+    check("Next steps to the next line and seeks just inside it", nxt["index"] in shown() and at(nxt),
           "shown %r, video %r" % (shown(), video_state(page)))
     page.locator(".sqe-prev").click()
     page.wait_for_timeout(200)
