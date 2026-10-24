@@ -168,3 +168,33 @@ test('works with the real clock too', async () => {
     assert.equal(got, client);
     await assert.rejects(L.waitForApiClient({ getClient: () => undefined, intervalMs: 5, timeoutMs: 30 }), /Timed out/);
 });
+
+test('waitForApiClient calls the timer and clock as plain functions (browsers refuse setTimeout as a method)', async () => {
+    const pending = [];
+    let clock = 0;
+    function strictTimer(fn) {
+        'use strict';
+        if (this !== undefined) {
+            throw new TypeError('Illegal invocation');
+        }
+
+        pending.push(fn);
+    }
+
+    function strictNow() {
+        'use strict';
+        if (this !== undefined) {
+            throw new TypeError('Illegal invocation');
+        }
+
+        return clock;
+    }
+
+    let client = null;
+    const waiting = L.waitForApiClient({ getClient: () => client, setTimer: strictTimer, now: strictNow, requireLogin: false });
+    assert.equal(pending.length, 1, 'the first check schedules the next one');
+    client = { getCurrentUser: () => Promise.resolve({}), getUrl: () => '' };
+    clock = 100;
+    pending.shift()();
+    assert.equal(await waiting, client);
+});

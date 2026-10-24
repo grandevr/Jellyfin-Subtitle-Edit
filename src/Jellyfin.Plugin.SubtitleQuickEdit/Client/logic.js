@@ -879,8 +879,12 @@
             now: Date.now,
             setTimer: setTimeout,
         }, options || {});
+        // Called as plain functions, never as methods of `o`: browsers refuse setTimeout with another `this`
+        // ("Illegal invocation").
+        const nowFn = o.now;
+        const setTimer = o.setTimer;
         return new Promise(function (resolve, reject) {
-            const started = o.now();
+            const started = nowFn();
             function check() {
                 let client = null;
                 let ready = false;
@@ -896,12 +900,12 @@
                     return;
                 }
 
-                if (o.now() - started >= o.timeoutMs) {
+                if (nowFn() - started >= o.timeoutMs) {
                     reject(new Error('Timed out waiting for ApiClient.'));
                     return;
                 }
 
-                o.setTimer(check, o.intervalMs);
+                setTimer(check, o.intervalMs);
             }
 
             check();

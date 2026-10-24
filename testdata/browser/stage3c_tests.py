@@ -2,10 +2,12 @@
 """Stage 3c browser tests: the edit button and the panel shell, in headless Chromium against the THROWAWAY test Jellyfin.
 
 Runs inside the Playwright image (sqe-playwright:1.64.1, Playwright for Python) on a host that can reach JF_BASE:
-  docker run --rm -i -e JF_BASE -v <synced-repo>:/sqe:ro sqe-playwright:1.64.1 python3 /sqe/testdata/browser/stage3c_tests.py
+  docker run --rm -i -e JF_BASE -v <folder holding testdata/browser>:/sqe:ro sqe-playwright:1.64.1 \
+    python3 /sqe/testdata/browser/stage3c_tests.py
+(devtools/sync.sh skips testdata/, so copy testdata/browser to the test host first.)
 Reads two lines on stdin: the testadmin password, then the testuser password. Prints neither, and no tokens or URLs
 with tokens. Needs the TestWebm library (testdata/make_webm.sh). Prints PASS/FAIL per check; exit code 1 on any failure.
-Optional: SQE_SHOTS=<folder> saves a screenshot after each scenario.
+Optional: SQE_SHOTS=<folder> saves a screenshot after each scenario, and one where a scenario fails.
 """
 import json
 import os
@@ -94,6 +96,8 @@ def login(page, name, pw):
     password.first.press("Enter")
     page.wait_for_function("() => window.ApiClient && window.ApiClient.isLoggedIn && window.ApiClient.isLoggedIn()",
                            timeout=20000)
+    # jellyfin-web redirects to the home page after login; navigating before that lands would be overwritten by it.
+    page.wait_for_function("() => location.hash.indexOf('#/home') === 0", timeout=20000)
 
 
 def show_osd(page):
@@ -146,9 +150,10 @@ def video_state(page):
 
 # ---- scenarios -----------------------------------------------------------------------------------------------------
 
-def admin_desktop(browser):
+def admin_desktop(browser, pages):
     ctx = browser.new_context(viewport={"width": 1280, "height": 720})
     page = ctx.new_page()
+    pages.append(page)
     login(page, ADMIN_NAME, ADMIN_PW)
 
     movie = MOVIES["TestWebm 01"]
@@ -224,9 +229,10 @@ def admin_desktop(browser):
     ctx.close()
 
 
-def admin_phone(browser):
+def admin_phone(browser, pages):
     ctx = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
     page = ctx.new_page()
+    pages.append(page)
     login(page, ADMIN_NAME, ADMIN_PW)
     movie = MOVIES["TestWebm 01"]
     en = [t for t in tracks(movie) if t["external"] and t["format"] == "srt" and t["editable"]]
@@ -247,9 +253,10 @@ def admin_phone(browser):
     ctx.close()
 
 
-def non_admin(browser):
+def non_admin(browser, pages):
     ctx = browser.new_context(viewport={"width": 1280, "height": 720})
     page = ctx.new_page()
+    pages.append(page)
     login(page, USER_NAME, USER_PW)
     play(page, MOVIES["TestWebm 01"])
     hidden = wait_button(page, False, 2) and not wait_button(page, True, 8)
@@ -263,10 +270,23 @@ def non_admin(browser):
 with sync_playwright() as p:
     browser = p.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
     for scenario in (admin_desktop, admin_phone, non_admin):
+        pages = []
         try:
-            scenario(browser)
+            scenario(browser, pages)
         except Exception as e:  # report and carry on with the next scenario
             check(scenario.__name__ + " ran to the end", False, type(e).__name__ + ": " + str(e).splitlines()[0][:200])
+            if pages:
+                try:
+                    shot(pages[-1], scenario.__name__ + "-failed")
+                    state = pages[-1].evaluate("() => window.SubtitleQuickEdit && window.SubtitleQuickEdit.debugState()")
+                    print("     state at failure: " + json.dumps(state), flush=True)
+                except Exception:
+                    pass
+            for page in pages:
+                try:
+                    page.context.close()
+                except Exception:
+                    pass
     browser.close()
 
 print("%d of %d passed" % (sum(results), len(results)))
