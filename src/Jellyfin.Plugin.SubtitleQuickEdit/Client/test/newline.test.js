@@ -77,6 +77,13 @@ test('overlapWarning is null without overlaps and names the cues otherwise', () 
     assert.equal(L.overlapWarning([SPAN[0], SPAN[1], SPAN[2]]), 'Overlaps 3 cues: 1, 2, 3.');
 });
 
+test('overlapWarning also counts overlapped staged new lines', () => {
+    assert.equal(L.overlapWarning([], 0), null);
+    assert.equal(L.overlapWarning([], 1), 'Overlaps 1 staged new line.');
+    assert.equal(L.overlapWarning(null, 2), 'Overlaps 2 staged new lines.');
+    assert.equal(L.overlapWarning([SPAN[2]], 1), 'Overlaps cue 3 (00:00:01,500 to 00:00:03,000). Also overlaps 1 staged new line.');
+});
+
 // ---- text rules -----------------------------------------------------------------------------------------------
 
 test('validateCueText accepts ordinary text and normalizes line breaks', () => {

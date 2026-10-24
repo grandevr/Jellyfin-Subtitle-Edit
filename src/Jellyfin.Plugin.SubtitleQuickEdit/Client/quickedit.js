@@ -25,6 +25,8 @@
     const REFRESH_DELAY_MS = 100; // coalesces bursts of DOM changes into one refresh
     const RELOAD_OFF_MS = 1500; // Reload: how long the subtitle stays off before it is switched on again
     const RELOAD_CHECK_MS = 5000; // Reload: how long to wait for the player to show the saved text before the fallback
+    const NUDGE_MS = 100; // the new-line form's -100 ms / +100 ms buttons
+    const PREVIEW_LEAD_MS = 1000; // Preview starts this long before the new line
     const LOG = '[SubtitleQuickEdit]';
 
     const L = window.SqeLogic;
@@ -52,6 +54,7 @@
         target: null, // { itemId, streamIndex, track } when the active track is editable, else null
         panel: null, // the open panel's elements, or null
         resumeOnClose: false,
+        preview: null, // the timer that pauses the video at the end of a new line's Preview
     };
 
     // ---- small helpers -----------------------------------------------------------------------------------------------
@@ -507,13 +510,16 @@
         nav.appendChild(button('sqe-prev', '‹ Previous', 'Previous line', function () {
             step(-1);
         }));
+        nav.appendChild(button('sqe-add', '+ Add line', 'Add a new line at the current time', function () {
+            openForm(null);
+        }));
         nav.appendChild(button('sqe-next', 'Next ›', 'Next line', function () {
             step(1);
         }));
         const cues = el('div', 'sqe-cues');
         const actions = el('div', 'sqe-actions');
         actions.appendChild(button('sqe-apply', 'Apply', 'Stage the change (Ctrl+Enter)', function () {
-            applyEdits();
+            applyCurrent();
         }));
         actions.appendChild(button('sqe-save sqe-primary', 'Save', 'Write the staged changes to the file (Ctrl+S)', function () {
             saveChanges();
@@ -535,7 +541,7 @@
         nav.hidden = true;
         actions.hidden = true;
         changes.hidden = true;
-        return { root: root, status: status, nav: nav, cues: cues, actions: actions, changes: changes, list: list, shown: [] };
+        return { root: root, status: status, nav: nav, cues: cues, actions: actions, changes: changes, list: list, shown: [], form: null };
     }
 
     function showStatus(text, isError) {
@@ -563,6 +569,8 @@
         const panel = state.panel;
         const box = panel.cues;
         box.textContent = '';
+        stopPreview();
+        panel.form = null;
         panel.shown = shown.cues;
         panel.nav.hidden = false;
         panel.actions.hidden = shown.cues.length === 0;
@@ -607,6 +615,7 @@
         const cues = panel.loaded ? panel.loaded.cues : [];
         panel.nav.querySelector('.sqe-prev').disabled = !L.stepCue(cues, panel.shown, -1);
         panel.nav.querySelector('.sqe-next').disabled = !L.stepCue(cues, panel.shown, 1);
+        panel.nav.querySelector('.sqe-add').disabled = !panel.model;
     }
 
     /** Moves the video to a time (ms) and keeps it paused. */
@@ -684,12 +693,262 @@
         }
     }
 
+    // ---- adding a line ---------------------------------------------------------------------------------------------
+
+    function currentMs() {
+        return L.secondsToMs(state.video ? state.video.currentTime : 0) || 0;
+    }
+
+    /** The form's values: { startMs, endMs, text }; a time that does not parse is null. */
+    function readForm() {
+        const form = state.panel.form;
+        return { startMs: L.parseTime(form.start.value), endMs: L.parseTime(form.end.value), text: form.text.value };
+    }
+
+    function fieldError(key, message) {
+        const error = state.panel.form.errors[key];
+        error.textContent = message || '';
+        error.hidden = !message;
+    }
+
+    function setField(input, key, ms) {
+        input.value = L.formatTime(ms);
+        fieldError(key, null);
+        updateFormWarning();
+    }
+
+    /** Shows the overlap warning for the times in the form (existing cues and other staged new lines). */
+    function updateFormWarning() {
+        const panel = state.panel;
+        const form = panel.form;
+        const line = readForm();
+        let warning = null;
+        if (line.startMs !== null && line.endMs !== null && line.endMs > line.startMs) {
+            warning = L.overlapWarning(L.findOverlaps(panel.loaded.cues, line.startMs, line.endMs),
+                panel.model.stagedOverlaps(line.startMs, line.endMs, form.clientId).length);
+        }
+
+        form.warning.textContent = warning || '';
+        form.warning.hidden = !warning;
+    }
+
+    /** A time field with its "Set to now" and -100 ms / +100 ms buttons. */
+    function timeField(form, key, label, ms) {
+        const wrap = el('div', 'sqe-field');
+        const input = el('input', 'sqe-time sqe-' + key);
+        input.type = 'text';
+        input.id = 'sqe-new-' + key;
+        input.value = L.formatTime(ms);
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        input.placeholder = 'hh:mm:ss,mmm';
+        input.addEventListener('input', function () {
+            fieldError(key, null);
+            updateFormWarning();
+        });
+        const caption = el('label', 'sqe-label', label);
+        caption.htmlFor = input.id;
+        const row = el('div', 'sqe-time-row');
+        function nudge(delta) {
+            const value = L.parseTime(input.value);
+            setField(input, key, L.nudgeTime(value === null ? currentMs() : value, delta, state.panel.model.runtimeMs));
+        }
+
+        row.appendChild(input);
+        row.appendChild(button('sqe-nudge sqe-' + key + '-minus', '−100 ms', label + ' 100 ms earlier', function () {
+            nudge(-NUDGE_MS);
+        }));
+        row.appendChild(button('sqe-nudge sqe-' + key + '-plus', '+100 ms', label + ' 100 ms later', function () {
+            nudge(NUDGE_MS);
+        }));
+        row.appendChild(button('sqe-now sqe-' + key + '-now', 'Set to now', 'Use the current playback time', function () {
+            setField(input, key, currentMs());
+        }));
+        const error = el('p', 'sqe-field-error');
+        error.hidden = true;
+        wrap.appendChild(caption);
+        wrap.appendChild(row);
+        wrap.appendChild(error);
+        form[key] = input;
+        form.errors[key] = error;
+        return wrap;
+    }
+
+    /**
+     * Opens the new-line form in place of the cue boxes: empty and prefilled at the current time, or with a staged (or
+     * failed) new line from the changes list so its text or timing can be changed.
+     */
+    function openForm(row) {
+        const panel = state.panel;
+        if (!panel || !panel.model || panel.busy) {
+            return;
+        }
+
+        stopPreview();
+        let line;
+        if (row) {
+            line = { startMs: row.startMs, endMs: row.endMs, text: row.text };
+        } else {
+            const d = L.defaultNewLine(panel.loaded.cues, currentMs(), panel.model.runtimeMs);
+            line = { startMs: d.startMs, endMs: d.endMs, text: '' };
+        }
+
+        const form = { clientId: row ? row.clientId : null, errors: {} };
+        panel.form = form;
+        const box = panel.cues;
+        box.textContent = '';
+        const item = el('section', 'sqe-new-line');
+        const heading = el('div', 'sqe-cue-heading');
+        heading.appendChild(el('span', 'sqe-cue-number', 'New line'));
+        if (row) {
+            heading.appendChild(el('span', 'sqe-badge sqe-badge-' + row.status, row.status));
+        }
+
+        item.appendChild(heading);
+        item.appendChild(timeField(form, 'start', 'Start', line.startMs));
+        item.appendChild(timeField(form, 'end', 'End', line.endMs));
+        const textWrap = el('div', 'sqe-field');
+        const text = el('textarea', 'sqe-cue-text sqe-new-text');
+        text.id = 'sqe-new-text';
+        text.value = line.text;
+        text.rows = Math.max(2, line.text.split('\n').length);
+        const caption = el('label', 'sqe-label', 'Text');
+        caption.htmlFor = text.id;
+        const textError = el('p', 'sqe-field-error');
+        textError.hidden = true;
+        text.addEventListener('input', function () {
+            fieldError('text', null);
+        });
+        textWrap.appendChild(caption);
+        textWrap.appendChild(text);
+        textWrap.appendChild(textError);
+        item.appendChild(textWrap);
+        form.text = text;
+        form.errors.text = textError;
+        form.warning = el('p', 'sqe-warning');
+        form.warning.hidden = true;
+        item.appendChild(form.warning);
+        const buttons = el('div', 'sqe-form-buttons');
+        buttons.appendChild(button('sqe-preview', 'Preview', 'Play from 1 s before the start to the end', function () {
+            preview();
+        }));
+        buttons.appendChild(button('sqe-cancel', 'Cancel', 'Back to the lines', function () {
+            renderCues({ mode: 'active', cues: state.panel.shown }, '');
+        }));
+        item.appendChild(buttons);
+        box.appendChild(item);
+        panel.actions.hidden = false;
+        if (row && row.message) {
+            showStatus(row.message, true);
+        } else {
+            showStatus(row ? 'Change the times or the text, then Apply.' : 'Set the times and type the text, then Apply.');
+        }
+
+        updateFormWarning();
+        text.focus();
+    }
+
+    /** Stages the form's new line, or updates the staged one it was opened from. True when it was staged. */
+    function applyForm() {
+        const panel = state.panel;
+        const form = panel.form;
+        const line = readForm();
+        ['start', 'end', 'text'].forEach(function (key) {
+            fieldError(key, null);
+        });
+        const result = form.clientId ? panel.model.updateAdd(form.clientId, line) : panel.model.stageAdd(line);
+        if (!result.ok) {
+            const shown = {};
+            result.errors.forEach(function (e) {
+                if (form.errors[e.field] && !shown[e.field]) {
+                    shown[e.field] = true;
+                    fieldError(e.field, e.message);
+                }
+            });
+            showStatus(shown.start || shown.end || shown.text ? 'Fix the marked fields, then Apply.' : result.errors[0].message, true);
+            return false;
+        }
+
+        persist(panel.target, panel.model);
+        renderChanges();
+        renderCues(L.cueForTime(panel.loaded.cues, result.row.startMs),
+            form.clientId ? 'New line updated.' : 'New line staged. Save writes it to the file.');
+        return true;
+    }
+
+    /**
+     * The Apply button and Ctrl+Enter: stages the form or the changed text boxes. For Save, an untouched empty form is
+     * left out. False when the form could not be staged.
+     */
+    function applyCurrent(forSave) {
+        const panel = state.panel;
+        if (!panel || !panel.model) {
+            return false;
+        }
+
+        if (panel.form) {
+            if (forSave && !panel.form.clientId && panel.form.text.value.trim() === '') {
+                return true;
+            }
+
+            return applyForm();
+        }
+
+        applyEdits();
+        return true;
+    }
+
+    /** Plays from 1 s before the new line's start to its end, then pauses, so the timing can be checked by ear. */
+    function preview() {
+        const video = state.video;
+        const line = readForm();
+        if (!video) {
+            return;
+        }
+
+        if (line.startMs === null || line.endMs === null || line.endMs <= line.startMs) {
+            showStatus('Fix the start and end times before previewing.', true);
+            return;
+        }
+
+        stopPreview();
+        video.currentTime = Math.max(0, line.startMs - PREVIEW_LEAD_MS) / 1000;
+        showStatus('Previewing ' + L.formatTime(line.startMs) + ' to ' + L.formatTime(line.endMs) + '…');
+        state.preview = setInterval(function () {
+            if (state.video !== video || video.ended || video.currentTime * 1000 >= line.endMs) {
+                stopPreview();
+                if (state.panel && state.panel.form) {
+                    showStatus('Preview done.');
+                }
+            }
+        }, 50);
+        const played = video.play();
+        if (played && typeof played.catch === 'function') {
+            played.catch(function () {
+                stopPreview();
+                showStatus('The browser did not start playback; press play on the video.', true);
+            });
+        }
+    }
+
+    /** Ends a running Preview and pauses the video. */
+    function stopPreview() {
+        if (state.preview !== null) {
+            clearInterval(state.preview);
+            state.preview = null;
+            if (state.video && !state.video.paused) {
+                state.video.pause();
+            }
+        }
+    }
+
     function changeRow(row) {
         const item = el('li', 'sqe-change sqe-change-' + row.status);
         item.setAttribute('data-row-id', row.rowId);
         const top = el('div', 'sqe-change-top');
         const where = row.type === 'add'
-            ? 'New · ' + L.formatTime(row.startMs) + ' → ' + L.formatTime(row.endMs)
+            ? (row.status === 'saved' && row.position ? 'Line ' + row.position + ' (new)' : 'New') + ' · ' +
+              L.formatTime(row.startMs) + ' → ' + L.formatTime(row.endMs)
             : 'Line ' + row.cueIndex + ' · ' + L.formatTime(row.start);
         top.appendChild(el('span', 'sqe-change-where', where));
         top.appendChild(el('span', 'sqe-badge sqe-badge-' + row.status, row.status));
@@ -717,7 +976,7 @@
         }
 
         item.tabIndex = 0;
-        item.title = 'Show this line';
+        item.title = row.type === 'add' && row.status !== 'saved' ? 'Change this new line' : 'Show this line';
         item.addEventListener('keydown', function (e) {
             if (e.key === 'Enter' && e.target === item) {
                 item.click();
@@ -725,6 +984,12 @@
         });
         item.addEventListener('click', function () {
             const panel = state.panel;
+            if (row.type === 'add' && row.status !== 'saved') {
+                seekTo(row.startMs);
+                openForm(row);
+                return;
+            }
+
             const at = row.type === 'add' ? row.startMs : row.start;
             const cue = row.type === 'edit' ? panel.loaded.cues.filter(function (c) {
                 return c.index === row.cueIndex;
@@ -775,14 +1040,20 @@
         }
     }
 
-    /** Re-shows the lines the panel showed, by cue number, from the panel's current cues. */
+    /**
+     * Re-shows the lines the panel showed from the panel's current cues. Found by time, not number: a saved new line
+     * renumbers every line after it.
+     */
     function reshow(note) {
         const panel = state.panel;
-        const numbers = panel.shown.map(function (c) {
-            return c.index;
-        });
+        if (panel.shown.length === 0) {
+            renderCues(L.cueForTime(panel.loaded.cues, currentMs()), note);
+            return;
+        }
+
+        const at = panel.shown[0].start;
         const cues = panel.loaded.cues.filter(function (c) {
-            return numbers.indexOf(c.index) >= 0;
+            return c.start <= at && at < c.end;
         });
         renderCues({ mode: 'active', cues: cues.length > 0 ? cues : panel.shown }, note);
     }
@@ -794,7 +1065,11 @@
             return;
         }
 
-        applyEdits(); // a text box that was changed but not applied yet is saved too
+        // A text box or new-line form that was changed but not applied yet is saved too.
+        if (!applyCurrent(true)) {
+            return;
+        }
+
         const model = panel.model;
         const target = panel.target;
         const prepared = model.prepareSave();
@@ -1048,6 +1323,7 @@
             state.panel.model.dropSaved(); // saved rows stay in the list only while the panel is open
         }
 
+        stopPreview();
         state.panel.root.remove();
         state.panel = null;
         document.body.classList.remove('sqe-panel-open');
@@ -1078,7 +1354,7 @@
                 closePanel();
             } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 e.preventDefault();
-                applyEdits();
+                applyCurrent();
             } else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
                 e.preventDefault(); // never the browser's save dialog
                 saveChanges();

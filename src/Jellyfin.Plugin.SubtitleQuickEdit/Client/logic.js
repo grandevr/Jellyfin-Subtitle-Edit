@@ -211,20 +211,27 @@
         }));
     }
 
-    /** The warning text for a list of overlapped cues, or null when there are none. It warns; it never blocks. */
-    function overlapWarning(overlaps) {
-        if (!overlaps || overlaps.length === 0) {
-            return null;
-        }
-
-        if (overlaps.length === 1) {
+    /**
+     * The warning text for a list of overlapped cues and a count of overlapped staged new lines, or null when there are
+     * none. It warns; it never blocks.
+     */
+    function overlapWarning(overlaps, stagedCount) {
+        const parts = [];
+        if (overlaps && overlaps.length === 1) {
             const c = overlaps[0];
-            return 'Overlaps cue ' + c.index + ' (' + formatTime(c.start) + ' to ' + formatTime(c.end) + ').';
+            parts.push('Overlaps cue ' + c.index + ' (' + formatTime(c.start) + ' to ' + formatTime(c.end) + ').');
+        } else if (overlaps && overlaps.length > 1) {
+            parts.push('Overlaps ' + overlaps.length + ' cues: ' + overlaps.map(function (c) {
+                return c.index;
+            }).join(', ') + '.');
         }
 
-        return 'Overlaps ' + overlaps.length + ' cues: ' + overlaps.map(function (c) {
-            return c.index;
-        }).join(', ') + '.';
+        if (stagedCount > 0) {
+            parts.push((parts.length > 0 ? 'Also overlaps ' : 'Overlaps ') + stagedCount + ' staged new line' +
+                (stagedCount === 1 ? '' : 's') + '.');
+        }
+
+        return parts.length > 0 ? parts.join(' ') : null;
     }
 
     // ---- text and new-line checks (the same rules the server applies) ----------------------------------------------

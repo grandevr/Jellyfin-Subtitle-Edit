@@ -44,9 +44,17 @@ setTimeout(() => {
         window.fakeEditsSent.push(body);
         const f = file();
         if (body.baseHash !== f.hash) { return refused(409, { code: 'FileChanged', message: 'changed', currentHash: f.hash }); }
-        body.edits.forEach((e) => { f.cues[e.cueIndex - 1].text = e.newText; });
+        body.edits.filter((e) => e.type === 'edit').forEach((e) => { f.cues[e.cueIndex - 1].text = e.newText; });
+        const added = {};
+        body.edits.filter((e) => e.type === 'add').forEach((e) => {
+          const cue = { start: e.startMs, end: e.endMs, text: e.text, clientId: e.clientId };
+          const at = f.cues.findIndex((c) => c.start > e.startMs); // before the first cue that starts later
+          f.cues.splice(at < 0 ? f.cues.length : at, 0, cue);
+        });
+        f.cues.forEach((c, i) => { c.index = i + 1; if (c.clientId) { added[c.clientId] = c.index; delete c.clientId; } });
         f.n++; f.hash = 'h' + f.n; store(f);
-        return Promise.resolve({ hash: f.hash, savedCueIndexes: body.edits.map((e) => e.cueIndex), addedCues: {}, writeMethod: 'Rename' });
+        return Promise.resolve({ hash: f.hash, savedCueIndexes: body.edits.filter((e) => e.type === 'edit').map((e) => e.cueIndex),
+          addedCues: added, writeMethod: 'Rename' });
       }
       if (o.url === 'Sessions/s1/Command' && body.Name === 'SetSubtitleStreamIndex') {
         const track = Array.from(document.querySelector('video').textTracks).find((t) => t.label === 'manualTrack');
@@ -63,7 +71,7 @@ setTimeout(() => {
   const track = v.addTextTrack('subtitles', 'manualTrack', 'und'); track.mode = 'showing'; fillTrack(track);
   document.body.insertAdjacentHTML('beforeend', '<div class="videoOsdBottom"><div class="osdControls"><div class="buttons"><button class="btnSubtitles">CC</button><button class="btnFullscreen">F</button></div></div></div>');
 }, 800);`;
-const html = `<html><head><style>${css}</style></head><body><script>${script}</script><script>${fake}</script></body></html>`;
+const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><body><script>${script}</script><script>${fake}</script></body></html>`;
 
 (async () => {
   const b = await chromium.launch();
@@ -167,6 +175,61 @@ const html = `<html><head><style>${css}</style></head><body><script>${script}</s
   await p.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Saved') === 0, null, { timeout: 5000 });
   checks['saving again writes the still-matching edit'] =
     (await p.evaluate(() => JSON.parse(sessionStorage.getItem('fake-file')).cues[0].text)) === 'Hello again';
+
+  // 3f: add a line.
+  await p.evaluate(() => { document.querySelector('video').currentTime = 0; });
+  await p.click('.sqe-add');
+  await p.waitForSelector('.sqe-new-line', { timeout: 3000 });
+  const field = (k) => p.inputValue('.sqe-new-line .sqe-' + k);
+  const warning = () => p.$eval('.sqe-warning', (e) => (e.hidden ? '' : e.textContent));
+  const fieldErr = (k) => p.$eval('#sqe-new-' + k, (e) => { const x = e.closest('.sqe-field').querySelector('.sqe-field-error'); return x.hidden ? '' : x.textContent; });
+  checks['Add line prefills start at the current time and end 2 s later'] =
+    (await field('start')) === '00:00:00,000' && (await field('end')) === '00:00:02,000';
+  checks['the new-line text box has focus'] = (await p.evaluate(() => document.activeElement.id)) === 'sqe-new-text';
+  checks['an overlap is warned about'] = (await warning()).indexOf('Overlaps cue 1') === 0;
+  await p.click('.sqe-start-plus');
+  await p.click('.sqe-start-plus');
+  await p.click('.sqe-start-minus');
+  checks['the nudge buttons move the time by 100 ms'] = (await field('start')) === '00:00:00,100';
+  await p.fill('.sqe-new-line .sqe-end', '00:00:00,050');
+  await p.fill('.sqe-new-text', 'Brand new');
+  await p.click('.sqe-apply');
+  checks['an end before the start is refused with a clear message on the end field'] =
+    (await fieldErr('end')) === 'A new line must end after it starts.' && (await rows()).every((r) => r.indexOf('Brand new') < 0);
+  await p.fill('.sqe-new-line .sqe-end', '00:01:30,000');
+  await p.click('.sqe-apply');
+  checks['an end past the runtime is refused'] = (await fieldErr('end')) === 'A new line must not end after the end of the video.';
+  await p.fill('.sqe-new-line .sqe-end', '00:00:02,500');
+  await p.keyboard.press('Control+Enter');
+  const added1 = await rows();
+  checks['Apply stages the new line in the changes list'] = !(await p.$('.sqe-new-line')) &&
+    added1.some((r) => r === 'New · 00:00:00,100 → 00:00:02,500|Brand new|staged');
+  await p.click('.sqe-change-staged');
+  checks['clicking a staged new line reopens it in the form'] = (await p.inputValue('.sqe-new-text')) === 'Brand new' &&
+    (await field('start')) === '00:00:00,100';
+  if (process.env.SQE_SHOTS) { // optional screenshots of the form, wide and at phone width
+    await p.screenshot({ path: process.env.SQE_SHOTS + '/fake-3f-form.png' });
+    await p.setViewportSize({ width: 390, height: 844 });
+    await p.screenshot({ path: process.env.SQE_SHOTS + '/fake-3f-form-phone.png' });
+    await p.setViewportSize({ width: 1280, height: 720 });
+  }
+  await p.fill('.sqe-new-text', 'Brand new line');
+  await p.click('.sqe-apply');
+  const added2 = (await rows()).filter((r) => r.indexOf('New') === 0);
+  checks['changing it updates the same row'] = added2.length === 1 && added2[0].indexOf('|Brand new line|') > 0;
+  await p.click('.sqe-add');
+  await p.click('.sqe-cancel');
+  checks['Cancel goes back to the lines'] = !(await p.$('.sqe-new-line')) && (await p.$$('.sqe-cue')).length > 0;
+  await p.click('.sqe-save');
+  await p.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Saved') === 0, null, { timeout: 5000 });
+  const lastSent = await p.evaluate(() => window.fakeEditsSent[window.fakeEditsSent.length - 1]);
+  const fileNow = await p.evaluate(() => JSON.parse(sessionStorage.getItem('fake-file')).cues.map((c) => c.index + ':' + c.text).join('|'));
+  checks['Save sends the new line with its clientId and times'] = lastSent.edits.length === 1 && lastSent.edits[0].type === 'add' &&
+    lastSent.edits[0].startMs === 100 && lastSent.edits[0].endMs === 2500 && typeof lastSent.edits[0].clientId === 'string';
+  checks['the saved line lands in time order and the row shows its new number'] =
+    fileNow === '1:Hello again|2:Brand new line|3:Two (changed on disk)' &&
+    (await rows()).some((r) => r.indexOf('Line 2 (new)') === 0 && r.endsWith('|saved'));
+  info.fileNow = fileNow;
 
   await p.focus('.sqe-cue-text');
   await p.keyboard.press('Escape');

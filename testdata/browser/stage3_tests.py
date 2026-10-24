@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Stage 3 browser tests (3c button and panel, 3d editing, 3e saving), in headless Chromium against the THROWAWAY
-test Jellyfin. The saving checks change "TestWebm 01" subtitles through the editor and put the original text back.
+"""Stage 3 browser tests (3c button and panel, 3d editing, 3e saving, 3f adding), in headless Chromium against the
+THROWAWAY test Jellyfin. The saving checks change "TestWebm 01" subtitles through the editor and put the original text
+back. The adding checks add a line to "TestWebm 03.en.srt", which the API cannot undo: run testdata/reset_webm03_srt.sh
+before and after.
 
 Runs inside the Playwright image (sqe-playwright:1.64.1, Playwright for Python) on a host that can reach JF_BASE:
   docker run --rm -i -e JF_BASE -v <folder holding testdata/browser>:/sqe:ro sqe-playwright:1.64.1 \
@@ -478,6 +480,115 @@ def admin_saving(browser, pages):
         ctx.close()
 
 
+WEBM03_SRT_CUES = [(1000, 3000, "Good line one"), (4000, 6000, "Good line two")]  # as testdata/reset_webm03_srt.sh writes it
+
+
+def admin_adding(browser, pages):
+    """3f: add a line to "TestWebm 03.en.srt" (prefill, nudges, bad times, Preview, Save, renumbering, Reload).
+    The API cannot remove a line, so the file stays changed: testdata/reset_webm03_srt.sh puts it back."""
+    movie = MOVIES["TestWebm 03"]
+    srt = [t for t in tracks(movie) if t["external"] and t["format"] == "srt" and t["editable"]]
+    index = srt[0]["streamIndex"]
+    before = cues_full(movie, index)
+    if [(c["start"], c["end"], c["text"]) for c in before["cues"]] != WEBM03_SRT_CUES:
+        check("TestWebm 03.en.srt is as reset_webm03_srt.sh writes it (run that script first)", False,
+              "%d lines" % len(before["cues"]))
+        return
+
+    ctx = browser.new_context(viewport={"width": 1280, "height": 720})
+    page = ctx.new_page()
+    pages.append(page)
+
+    def field(key):
+        return page.locator(".sqe-new-line .sqe-" + key).input_value()
+
+    def field_error(key):
+        return page.evaluate("(k) => { const x = document.getElementById('sqe-new-' + k).closest('.sqe-field')"
+                             ".querySelector('.sqe-field-error'); return x.hidden ? '' : x.textContent; }", key)
+
+    def status():
+        return page.locator(".sqe-panel .sqe-status").text_content() or ""
+
+    def wait_status(text, seconds=15):
+        page.wait_for_function("(t) => { const s = document.querySelector('.sqe-panel .sqe-status');"
+                               " return s && s.textContent.indexOf(t) >= 0; }", arg=text, timeout=seconds * 1000)
+
+    try:
+        login(page, ADMIN_NAME, ADMIN_PW)
+        play(page, movie)
+        choose_subtitle(page, index)
+        seek_into(page, {"start": 200, "end": 200})
+        wait_button(page, True, 15)
+        show_osd(page)
+        page.locator(".sqe-edit-button").first.click()
+        page.wait_for_selector(".sqe-panel .sqe-cue-text", timeout=10000)
+        page.locator(".sqe-add").click()
+        page.wait_for_selector(".sqe-new-line", timeout=5000)
+
+        # Prefill: start at the current time, end at the next line's start (it comes before start + 2 s).
+        check("Add line prefills start at the current time and ends at the next line",
+              field("start") == "00:00:00,200" and field("end") == "00:00:01,000",
+              "start %s, end %s" % (field("start"), field("end")))
+        page.locator(".sqe-start-plus").click()
+        page.locator(".sqe-start-plus").click()
+        page.locator(".sqe-start-minus").click()
+        page.locator(".sqe-end-minus").click()
+        check("the nudge buttons move start and end by 100 ms",
+              field("start") == "00:00:00,300" and field("end") == "00:00:00,900",
+              "start %s, end %s" % (field("start"), field("end")))
+
+        # Bad times give a clear message and stage nothing.
+        box = page.locator(".sqe-new-text")
+        box.fill("Added by the 3f test")
+        page.locator(".sqe-new-line .sqe-end").fill("00:00:00,100")
+        page.locator(".sqe-apply").click()
+        msg_order = field_error("end")
+        page.locator(".sqe-new-line .sqe-end").fill("00:00:00,350")
+        page.locator(".sqe-apply").click()
+        msg_short = field_error("end")
+        page.locator(".sqe-new-line .sqe-end").fill("05:00:00,000")
+        page.locator(".sqe-apply").click()
+        msg_runtime = field_error("end")
+        check("bad times are refused with a clear message",
+              msg_order == "A new line must end after it starts." and msg_short == "A new line must be at least 100 ms long."
+              and msg_runtime == "A new line must not end after the end of the video." and page.locator(".sqe-change").count() == 0,
+              "%r / %r / %r" % (msg_order, msg_short, msg_runtime))
+
+        # Preview plays from 1 s before the start (here 0) to the end, then pauses.
+        page.locator(".sqe-new-line .sqe-end").fill("00:00:00,900")
+        page.locator(".sqe-preview").click()
+        wait_status("Preview done", 10)
+        st = video_state(page)
+        check("Preview plays the new line's span and pauses at its end", st["paused"] and 0.85 <= st["time"] <= 1.4, repr(st))
+
+        # Apply, then Save: the line lands first and every line is renumbered.
+        page.locator(".sqe-apply").click()
+        page.locator(".sqe-save").click()
+        wait_status("Saved")
+        after = cues_full(movie, index)
+        got = [(c["index"], c["start"], c["end"], c["text"]) for c in after["cues"]]
+        want = [(1, 300, 900, "Added by the 3f test")] + [(i + 2, a, b, t) for i, (a, b, t) in enumerate(WEBM03_SRT_CUES)]
+        check("the saved line lands in time order and the lines are renumbered 1..n, nothing else changes", got == want, repr(got))
+        rows = page.evaluate("() => Array.from(document.querySelectorAll('.sqe-change-where')).map((e) => e.textContent)")
+        check("the changes list shows the new line's number", any(r.startswith("Line 1 (new)") for r in rows), repr(rows))
+
+        # Reload: the new line shows on screen at its time.
+        page.locator(".sqe-reload").click()
+        wait_status("Subtitles reloaded", 20)
+        held = page.evaluate("""() => { const v = document.querySelector('video.htmlvideoplayer');
+            const tr = Array.from(v.textTracks).find((x) => x.label === 'manualTrack');
+            const c = tr && tr.cues ? Array.from(tr.cues).find((x) => x.startTime <= 0.6 && 0.6 < x.endTime) : null;
+            return c ? c.text : null; }""")
+        check("after Reload subtitles, the new line is in the player's track at its time",
+              held is not None and "Added by the 3f test" in held, repr(held))
+        shot(page, "3f-adding")
+    except Exception:
+        dump_failure(page, "admin_adding")
+        raise
+    finally:
+        ctx.close()
+
+
 def admin_phone(browser, pages):
     ctx = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
     page = ctx.new_page()
@@ -518,7 +629,7 @@ def non_admin(browser, pages):
 
 with sync_playwright() as p:
     browser = p.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
-    for scenario in (admin_desktop, admin_editing, admin_saving, admin_phone, non_admin):
+    for scenario in (admin_desktop, admin_editing, admin_saving, admin_adding, admin_phone, non_admin):
         pages = []
         try:
             scenario(browser, pages)

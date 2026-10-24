@@ -26,5 +26,6 @@ printf 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nEmbedded line\n' > /tmp/sqe-emb
   -map 0:v -map 0:a -map 1:s -c:v copy -c:a copy -c:s webvtt "$D/TestWebm 03.webm"
 rm -f /tmp/sqe-embedded.vtt
 printf 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nVTT line\n' > "$D/TestWebm 03.de.vtt"
+# Keep this line the same as in reset_webm03_srt.sh.
 printf '1\n00:00:01,000 --> 00:00:03,000\nGood line one\n\n2\n00:00:04,000 --> 00:00:06,000\nGood line two\n' > "$D/TestWebm 03.en.srt"
 ls -l "$D"
