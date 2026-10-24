@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Subtitle Quick Edit</title>
+</head>
+<body>
+    <div id="SubtitleQuickEditConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <h2>Subtitle Quick Edit</h2>
+                <form id="SubtitleQuickEditConfigForm">
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="AllowUserSubmissions" type="checkbox" is="emby-checkbox" />
+                            <span>Allow user submissions</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Non-admin users get the edit panel, and send their edits to an admin for review instead of saving them.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="MaxPendingSubmissionsPerUser">Max pending submissions per user</label>
+                        <input id="MaxPendingSubmissionsPerUser" type="number" is="emby-input" min="1" />
+                    </div>
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="BackupMode">Backups</label>
+                        <select is="emby-select" id="BackupMode" class="emby-select-withcolor emby-select">
+                            <option value="OriginalOnly">Original only</option>
+                            <option value="OriginalPlusLastN">Original + last N saves</option>
+                        </select>
+                        <div class="fieldDescription">Copies are kept in data/SubtitleQuickEdit/backups under Jellyfin's config folder, never next to the media.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="BackupKeepLastSaves">N: earlier versions to keep</label>
+                        <input id="BackupKeepLastSaves" type="number" is="emby-input" min="1" />
+                        <div class="fieldDescription">Used when Backups is "Original + last N saves".</div>
+                    </div>
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script type="text/javascript">
+            var SubtitleQuickEditConfig = {
+                pluginUniqueId: 'b3b6f2a4-6f0e-4d5c-9a0c-5e2f6c1d7a31'
+            };
+
+            document.querySelector('#SubtitleQuickEditConfigPage')
+                .addEventListener('pageshow', function() {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(SubtitleQuickEditConfig.pluginUniqueId).then(function (config) {
+                        document.querySelector('#AllowUserSubmissions').checked = config.AllowUserSubmissions;
+                        document.querySelector('#MaxPendingSubmissionsPerUser').value = config.MaxPendingSubmissionsPerUser;
+                        document.querySelector('#BackupMode').value = config.BackupMode;
+                        document.querySelector('#BackupKeepLastSaves').value = config.BackupKeepLastSaves;
+                        Dashboard.hideLoadingMsg();
+                    });
+                });
+
+            document.querySelector('#SubtitleQuickEditConfigForm')
+                .addEventListener('submit', function(e) {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(SubtitleQuickEditConfig.pluginUniqueId).then(function (config) {
+                        config.AllowUserSubmissions = document.querySelector('#AllowUserSubmissions').checked;
+                        config.MaxPendingSubmissionsPerUser = parseInt(document.querySelector('#MaxPendingSubmissionsPerUser').value, 10);
+                        config.BackupMode = document.querySelector('#BackupMode').value;
+                        config.BackupKeepLastSaves = parseInt(document.querySelector('#BackupKeepLastSaves').value, 10);
+                        ApiClient.updatePluginConfiguration(SubtitleQuickEditConfig.pluginUniqueId, config).then(function (result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                        });
+                    });
+
+                    e.preventDefault();
+                    return false;
+                });
+        </script>
+    </div>
+</body>
+</html>

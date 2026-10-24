@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/SubtitleQuickEdit.Core/SubtitleQuickEdit.Core.csproj" />
+  <Project Path="src/Jellyfin.Plugin.SubtitleQuickEdit/Jellyfin.Plugin.SubtitleQuickEdit.csproj" />
+  <Project Path="tests/SubtitleQuickEdit.Core.Tests/SubtitleQuickEdit.Core.Tests.csproj" />
+</Solution>
