@@ -3,19 +3,23 @@
 A Jellyfin 12.2 plugin that edits the text of the subtitle line on screen (or adds a new line) in external `.srt`
 files. Spec: the "Jellyfin Subtitle Quick-Edit Plugin — Spec" doc. Licence: GPL-3.0 (see `LICENSE`).
 
-Status: **stage 2 done**: the SRT core (stage 1), durability and platform handling, and the plugin with its server
-API, settings page and backups. The client script (button, panel) is stage 3; submissions and review are stage 4.
+Status: **stage 3 done** (waiting on the hand test): the SRT core (stage 1), the plugin with its server API, settings
+page and backups (stage 2), and the client script in the web player (stage 3). Submissions and review are stage 4.
+Nothing is deployed to a live server yet.
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `src/SubtitleQuickEdit.Core` | Jellyfin-free library: `Srt/` (parse, edit), `Storage/` (safe file write, backups, platform services), `Editing/` (the save rules) |
-| `src/Jellyfin.Plugin.SubtitleQuickEdit` | The plugin: controller, settings page, item/stream resolver, startup logging |
+| `src/Jellyfin.Plugin.SubtitleQuickEdit` | The plugin: controller, settings page, item/stream resolver, startup logging, File Transformation registration |
+| `src/Jellyfin.Plugin.SubtitleQuickEdit/Client` | The web player script: `logic.js` (page-free logic, Node-tested in `test/`), `quickedit.js` (button and panel), `quickedit.css` |
 | `tests/SubtitleQuickEdit.Core.Tests` | xUnit tests of the core |
-| `testdata/` | Scripts for the throwaway Jellyfin test server: fixtures, users, `stage2_api_tests.py` |
+| `testdata/` | Scripts for the throwaway Jellyfin test server: fixtures, users, `stage2_api_tests.py`, the TestWebm library (`make_webm.sh`, `reset_webm03_srt.sh`) |
+| `testdata/browser` | Browser tests: `stage3_tests.py` (headless Chromium against the test server), `fake_page_smoke.js` (no server), `reload_spike.py` |
 | `devtools/` | `sync.sh`, `dotnet.sh` (build/test in the SDK container on the test host), `prepare_mismatch.sh`, `mutation_check.py` |
 | `STAGE0-NOTES.md` | What Jellyfin 12.2 actually does (cache, encoding, refresh) |
+| `docs/client-notes.md` | What jellyfin-web 12.2 actually does (load order, OSD, Sessions lag, Reload, phone width) |
 
 ## Building, testing, installing on the test server
 
@@ -48,6 +52,12 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
 - API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>` resets the fixtures and runs 75 checks against the
   test server (see below).
 - `devtools/mutation_check.py` breaks the code in scratch copies (17 ways) and requires the unit tests to fail for each break. Last run: control passed, 17 of 17 killed.
+- Client, no server needed: `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js` (158 tests),
+  `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` (38 of 38 killed), and with Playwright for
+  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (35 checks against a fake jellyfin-web page).
+- Client against the test server: `testdata/browser/stage3_tests.py` (see its header). It needs the TestWebm library and
+  changes test subtitles: TestWebm 01 is restored through the API; run `testdata/reset_webm03_srt.sh` in the test
+  container before and after, because the API cannot remove the line it adds to TestWebm 03.
 
 ## Analyzers
 
@@ -87,6 +97,26 @@ Save rules in order (`Core/Editing/SubtitleSaveService`): the stream must be an 
 file must parse; its hash must equal `baseHash`; every edit must be valid and its `oldText` must match; the original is
 backed up; the new content is written by the hybrid writer. Jellyfin reads external `.srt` files on every request, so
 nothing is refreshed or invalidated afterwards.
+
+## The web player client
+
+Requires the File Transformation plugin (3.0.2.0 or later). At startup the plugin registers a transformation of
+`index.html` that adds one script tag and one stylesheet link, served anonymously from `/SubtitleQuickEdit/Client/`.
+If File Transformation is missing the server API still works and the log says why there is no button.
+
+For an administrator playing an item whose active subtitle is an editable external `.srt`, an edit button appears next
+to the subtitle button. It pauses the video and opens a panel (a side panel on desktop, a bottom sheet under 600 px):
+
+- one text box per line on screen (or the nearest line), with Previous/Next to step and seek;
+- **Apply** (Ctrl+Enter) stages changes; **Save** (Ctrl+S) writes everything staged in one request; **Reload subtitles**
+  makes the player show the saved file without restarting playback;
+- **+ Add line** opens a form with start and end times, Set to now, ±100 ms, Preview and an overlap warning;
+- "Changes this session" lists each change with its status (staged, saved, failed), Undo, and click to jump to it;
+- unsaved changes survive a page reload (`localStorage`, per user, item and track); Esc closes the panel, and keys typed
+  in the panel never reach the player.
+
+If the file changed on disk since it was loaded, Save writes nothing: changes that still match stay staged, the rest
+are marked failed. `window.SubtitleQuickEdit.debugState()` shows the client's state (no tokens) for troubleshooting.
 
 ## Settings
 

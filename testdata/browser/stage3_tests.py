@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage 3 browser tests (3c button and panel, 3d editing, 3e saving, 3f adding), in headless Chromium against the
+"""Stage 3 browser tests (3c button and panel, 3d editing, 3e saving, 3f adding, 3g phone width), in headless Chromium against the
 THROWAWAY test Jellyfin. The saving checks change "TestWebm 01" subtitles through the editor and put the original text
 back. The adding checks add a line to "TestWebm 03.en.srt", which the API cannot undo: run testdata/reset_webm03_srt.sh
 before and after.
@@ -589,6 +589,17 @@ def admin_adding(browser, pages):
         ctx.close()
 
 
+PHONE_LAYOUT = """() => {
+    const panel = document.querySelector('.sqe-panel');
+    const visible = (e) => e.getClientRects().length > 0;
+    const small = Array.from(panel.querySelectorAll('button')).filter(visible)
+        .filter((b) => b.getBoundingClientRect().height < 44).map((b) => b.className + ' ' + Math.round(b.getBoundingClientRect().height));
+    const rows = Array.from(panel.querySelectorAll('.sqe-time-row')).map((r) =>
+        new Set(Array.from(r.children).map((c) => Math.round(c.getBoundingClientRect().top))).size);
+    return { small: small, rows: rows, overflow: panel.scrollWidth - panel.clientWidth };
+}"""
+
+
 def admin_phone(browser, pages):
     ctx = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
     page = ctx.new_page()
@@ -602,7 +613,7 @@ def admin_phone(browser, pages):
     check("phone width: the button shows", ok)
     if ok:
         show_osd(page)
-        page.locator(".sqe-edit-button").first.click()
+        page.locator(".sqe-edit-button").first.tap()
         page.wait_for_selector(".sqe-panel .sqe-cue-text", timeout=10000)
         box = page.locator(".sqe-panel").bounding_box()
         check("phone width: the panel is a full-width bottom sheet",
@@ -610,6 +621,16 @@ def admin_phone(browser, pages):
               and box["height"] <= 0.61 * 844, "box %r" % box)
         check("phone width: the text box is visible", page.locator(".sqe-panel .sqe-cue-text").first.is_visible())
         shot(page, "3c-phone-panel")
+        page.locator(".sqe-add").tap()
+        page.wait_for_selector(".sqe-new-line", timeout=5000)
+        layout = page.evaluate(PHONE_LAYOUT)
+        check("phone width: every panel button is at least 44 px high", layout["small"] == [], repr(layout["small"]))
+        check("phone width: each time field and its buttons fit on one row", layout["rows"] == [1, 1], repr(layout["rows"]))
+        check("phone width: nothing in the panel scrolls sideways", layout["overflow"] <= 0, repr(layout["overflow"]))
+        shot(page, "3g-phone-form")
+        page.locator(".sqe-cancel").tap()
+        page.locator(".sqe-close").tap()
+        check("phone width: tapping close closes the panel", page.locator(".sqe-panel").count() == 0)
     ctx.close()
 
 
