@@ -13,6 +13,22 @@ const ORIGIN = 'http://sqe-fake.test';
 // The fake server and jellyfin-web. The "file" lives in sessionStorage so it survives a page reload.
 const fake = `
 window.jfKeys = [];
+const CUSTOM = location.search.indexOf('custom=1') >= 0; // jellyfin-web's custom subtitle renderer instead of a text track
+window.fakeEvents = null;
+function renderCustom() { // jellyfin-web's updateSubtitleText: the first cue that covers the time, or hidden
+  const inner = document.querySelector('.videoSubtitlesInner'); const v = document.querySelector('video');
+  if (!inner || !window.fakeEvents) { return; }
+  const t = v.currentTime * 1000; const c = window.fakeEvents.find((x) => x.start <= t && t <= x.end);
+  if (c) { inner.textContent = c.text; inner.classList.remove('hide'); } else { inner.classList.add('hide'); }
+}
+function showCustom() {
+  window.fakeEvents = file().cues;
+  if (!document.querySelector('.videoSubtitles')) {
+    const box = document.createElement('div'); box.className = 'videoSubtitles';
+    const inner = document.createElement('div'); inner.className = 'videoSubtitlesInner'; box.appendChild(inner);
+    document.querySelector('.videoPlayerContainer').appendChild(box);
+  }
+}
 const FILE_KEY = 'fake-file';
 const initial = { hash: 'h0', n: 0, cues: [{ index: 1, start: 0, end: 2000, text: 'Hello there' }, { index: 2, start: 3000, end: 4000, text: 'Two' }] };
 function file() { return JSON.parse(sessionStorage.getItem(FILE_KEY) || JSON.stringify(initial)); }
@@ -57,8 +73,12 @@ setTimeout(() => {
           addedCues: added, writeMethod: 'Rename' });
       }
       if (o.url === 'Sessions/s1/Command' && body.Name === 'SetSubtitleStreamIndex') {
-        const track = Array.from(document.querySelector('video').textTracks).find((t) => t.label === 'manualTrack');
-        if (body.Arguments.Index === '-1') { track.mode = 'disabled'; } else { track.mode = 'showing'; setTimeout(() => fillTrack(track), 300); }
+        if (CUSTOM) {
+          if (body.Arguments.Index === '-1') { const box = document.querySelector('.videoSubtitles'); if (box) { box.remove(); } } else { setTimeout(showCustom, 300); }
+        } else {
+          const track = Array.from(document.querySelector('video').textTracks).find((t) => t.label === 'manualTrack');
+          if (body.Arguments.Index === '-1') { track.mode = 'disabled'; } else { track.mode = 'showing'; setTimeout(() => fillTrack(track), 300); }
+        }
         // The real server carries the command out and answers 204 with no body, which ApiClient fails to parse as JSON.
         return o.dataType === 'json' ? Promise.reject(new SyntaxError('Unexpected end of JSON input')) : Promise.resolve(undefined);
       }
@@ -68,7 +88,11 @@ setTimeout(() => {
 setTimeout(() => {
   const c = document.createElement('div'); c.className = 'videoPlayerContainer';
   const v = document.createElement('video'); v.className = 'htmlvideoplayer'; c.appendChild(v); document.body.appendChild(c);
-  const track = v.addTextTrack('subtitles', 'manualTrack', 'und'); track.mode = 'showing'; fillTrack(track);
+  // A video with no source fires no seek events: make setting currentTime behave like a real seek.
+  let time = 0;
+  Object.defineProperty(v, 'currentTime', { get: () => time, set: (x) => { time = x; v.dispatchEvent(new Event('seeked')); v.dispatchEvent(new Event('timeupdate')); } });
+  v.addEventListener('timeupdate', renderCustom); // jellyfin-web's own handler, registered before the editor sees the video
+  if (CUSTOM) { showCustom(); } else { const track = v.addTextTrack('subtitles', 'manualTrack', 'und'); track.mode = 'showing'; fillTrack(track); }
   document.body.insertAdjacentHTML('beforeend', '<div class="videoOsdBottom"><div class="osdControls"><div class="buttons"><button class="btnSubtitles">CC</button><button class="btnFullscreen">F</button></div></div></div>');
 }, 800);`;
 const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><body><script>${script}</script><script>${fake}</script></body></html>`;
@@ -77,7 +101,7 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   const b = await chromium.launch();
   const p = await b.newPage();
   await p.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
-  const logs = [];
+  const logs = []; global.sqeLogs = logs;
   p.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
   p.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
   p.on('dialog', (d) => d.accept());
@@ -108,6 +132,9 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   await p.keyboard.press('Control+Enter');
   const rows1 = await rows();
   checks['Ctrl+Enter stages an edit and adds a row'] = rows1.length === 1 && rows1[0].indexOf('Hello world') > 0;
+  const trackTexts = () => p.evaluate(() => Array.from(Array.from(document.querySelector('video').textTracks)
+    .find((t) => t.label === 'manualTrack').cues).map((c) => c.text.replace(/\u200e/g, '')).join('|'));
+  checks['a staged edit shows in the player\'s text track'] = (await trackTexts()) === 'Hello world|Two';
   await p.fill('.sqe-cue-text', 'Hello, world');
   await p.click('.sqe-apply');
   const rows2 = await rows();
@@ -119,6 +146,7 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   checks['clicking a row shows its line with the staged text'] = (await texts()).join() === '1:Hello, world';
   await p.click('.sqe-undo');
   checks['undo removes the row and restores the text'] = (await rows()).length === 0 && (await texts()).join() === '1:Hello there';
+  checks['undo puts the player\'s text back'] = (await trackTexts()) === 'Hello there|Two';
   await p.fill('.sqe-cue-text', 'bad\n\nblank line');
   await p.click('.sqe-apply');
   checks['invalid text shows an error and stages nothing'] =
@@ -204,6 +232,7 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   const added1 = await rows();
   checks['Apply stages the new line in the changes list'] = !(await p.$('.sqe-new-line')) &&
     added1.some((r) => r === 'New · 00:00:00,100 → 00:00:02,500|Brand new|staged');
+  checks['a staged new line shows in the player\'s text track'] = (await trackTexts()).split('|').indexOf('Brand new') >= 0;
   await p.click('.sqe-change-staged');
   checks['clicking a staged new line reopens it in the form'] = (await p.inputValue('.sqe-new-text')) === 'Brand new' &&
     (await field('start')) === '00:00:00,100';
@@ -251,6 +280,49 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   await p.focus('.sqe-cue-text');
   await p.keyboard.press('Escape');
   checks['Esc closed the panel'] = !(await p.$('.sqe-panel'));
+  // The custom subtitle renderer (a jellyfin-web user setting): no text track, jellyfin-web's own element instead.
+  const q = await b.newPage();
+  await q.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  q.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
+  q.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+  await q.goto(ORIGIN + '/web/index.html?custom=1');
+  await q.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  await q.evaluate(() => { document.querySelector('video').currentTime = 0.5; });
+  await q.click('.sqe-edit-button');
+  await q.waitForSelector('.sqe-cue-text', { timeout: 5000 });
+  const shown = () => q.evaluate(() => { const e = document.querySelector('.videoSubtitlesInner'); return e && !e.classList.contains('hide') ? e.textContent : null; });
+  const tick = () => q.evaluate(() => document.querySelector('video').dispatchEvent(new Event('timeupdate')));
+  const qStatus = () => q.$eval('.sqe-status', (e) => e.textContent);
+  checks['custom renderer: the button and panel work without a text track'] = (await q.inputValue('.sqe-cue-text')) === 'Hello there';
+  await q.fill('.sqe-cue-text', 'Hello custom');
+  await q.click('.sqe-apply');
+  const c1 = await shown(); await tick(); const c2 = await shown();
+  checks['custom renderer: a staged edit shows on screen, also after the player redraws'] = c1 === 'Hello custom' && c2 === 'Hello custom';
+  await q.click('.sqe-undo');
+  checks['custom renderer: undo puts the player\'s text back'] = (await shown()) === 'Hello there';
+  await q.fill('.sqe-cue-text', 'Hello saved');
+  await q.click('.sqe-apply');
+  await q.click('.sqe-save');
+  await q.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Saved') === 0, null, { timeout: 5000 });
+  await tick();
+  checks['custom renderer: after Save the saved text stays on screen'] = (await shown()) === 'Hello saved';
+  await q.click('.sqe-reload');
+  await q.waitForFunction(() => /Subtitles reloaded|Could not/.test(document.querySelector('.sqe-status').textContent), null, { timeout: 12000 });
+  const reloadStatus = await qStatus();
+  checks['custom renderer: Reload subtitles reports success'] = reloadStatus.indexOf('Subtitles reloaded') === 0;
+  checks['custom renderer: after Reload the player shows the file\'s new text'] =
+    (await q.evaluate(() => window.fakeEvents[0].text)) === 'Hello saved' && (await shown()) === 'Hello saved';
+  await q.evaluate(() => { document.querySelector('video').currentTime = 2.5; });
+  await q.click('.sqe-add');
+  await q.fill('.sqe-new-line .sqe-start', '00:00:02,200');
+  await q.fill('.sqe-new-line .sqe-end', '00:00:02,800');
+  await q.fill('.sqe-new-text', 'Gap line');
+  await q.click('.sqe-apply');
+  await tick();
+  checks['custom renderer: a staged new line shows on screen at its time'] = (await shown()) === 'Gap line';
+  info.custom = { c1, c2, reloadStatus };
+  await q.close();
+
   checks['no errors in the console'] = logs.every((l) => !/^(error|pageerror)/.test(l));
 
   Object.keys(checks).forEach((k) => console.log((checks[k] ? 'PASS ' : 'FAIL ') + k));
@@ -259,4 +331,4 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
     process.exitCode = 1;
   }
   await b.close();
-})().catch((e) => { console.error('FAIL', e.message); process.exit(1); });
+})().catch((e) => { console.error('FAIL', e.message.split('\n')[0]); console.error(JSON.stringify(global.sqeLogs || [])); process.exit(1); });

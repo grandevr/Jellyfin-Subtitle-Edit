@@ -16,6 +16,7 @@
         subtitleButton: 'button.btnSubtitles',
         osdButton: '.videoOsdBottom button',
         menuItem: '.actionSheetMenuItem[data-id]',
+        customSubtitle: '.videoSubtitles .videoSubtitlesInner', // jellyfin-web's own subtitle element (custom renderer)
     };
     const BODY_IDLE_CLASS = 'mouseIdle'; // on <body> while the OSD is hidden
     const TEXT_TRACK_LABEL = 'manualTrack'; // the one text track jellyfin-web fills with the chosen subtitle's cues
@@ -55,6 +56,7 @@
         panel: null, // the open panel's elements, or null
         resumeOnClose: false,
         preview: null, // the timer that pauses the video at the end of a new line's Preview
+        showSavedText: false, // custom renderer: show the file's saved text until Reload subtitles (the player has the old)
     };
 
     // ---- small helpers -----------------------------------------------------------------------------------------------
@@ -408,6 +410,174 @@
 
     function persist(target, model) {
         drafts.save(state.userId, target.itemId, target.streamIndex, model.serialize());
+        refreshOverlay();
+    }
+
+    // ---- staged changes on screen: what Apply stages shows in the player before it is saved ------------------------
+    // jellyfin-web draws subtitles one of two ways: cues in a native text track ("manualTrack"), or its own element
+    // that it fills on every timeupdate (the "custom" renderer, a user setting). Native cues are changed in place; the
+    // custom element is overwritten after jellyfin-web's own timeupdate handler (ours is registered later, so runs after).
+
+    function customSubtitleElement() {
+        return document.querySelector(SEL.customSubtitle);
+    }
+
+    /** 'native', 'custom' or 'none': how the page shows the subtitle now. */
+    function subtitleRenderer() {
+        const track = manualTrack(state.video);
+        if (track && track.mode !== 'disabled') {
+            return 'native';
+        }
+
+        return customSubtitleElement() ? 'custom' : 'none';
+    }
+
+    /** The playing track's cues and its changes to show: { cues, edits, adds }, or null. */
+    function overlaySource() {
+        const target = state.target;
+        const key = target ? cacheKey(target) : null;
+        const model = key ? state.models[key] : null;
+        const loaded = key ? state.cues[key] : null;
+        if (!model || !loaded) {
+            return null;
+        }
+
+        const rows = model.snapshot();
+        return {
+            cues: loaded.cues,
+            edits: rows.filter(function (r) {
+                return r.type === 'edit' && r.status === 'staged';
+            }),
+            // Saved new lines too: the player only has them after Reload subtitles.
+            adds: rows.filter(function (r) {
+                return r.type === 'add' && (r.status === 'staged' || r.status === 'saved');
+            }),
+        };
+    }
+
+    const DIRECTION_MARKS = /[\u200e\u200f\u202a-\u202e]/g;
+
+    function editFor(src, cue) {
+        return src.edits.filter(function (r) {
+            return r.cueIndex === cue.index;
+        })[0] || null;
+    }
+
+    /** Native track: staged text replaces the cue's text, staged new lines become cues; undone changes go back. */
+    function overlayNative(track, src) {
+        const byStart = {};
+        const added = {};
+        Array.prototype.slice.call(track.cues || []).forEach(function (c) {
+            if (c.sqeAdded) {
+                added[c.sqeAdded] = c;
+                return;
+            }
+
+            const key = Math.round(c.startTime * 1000);
+            (byStart[key] = byStart[key] || []).push(c);
+        });
+        const seen = {};
+        src.cues.forEach(function (cue) {
+            const key = Math.round(cue.start);
+            const n = seen[key] || 0;
+            seen[key] = n + 1;
+            const shown = byStart[key] && byStart[key][n];
+            if (!shown) {
+                return; // not in the player's track (for example a subtitle offset shifts every cue)
+            }
+
+            const edit = editFor(src, cue);
+            if (edit || shown.sqeTouched) {
+                const want = edit ? edit.newText : cue.text;
+                if (String(shown.text).replace(DIRECTION_MARKS, '') !== want) {
+                    shown.text = want;
+                }
+
+                shown.sqeTouched = Boolean(edit);
+            }
+        });
+        const wanted = {};
+        src.adds.forEach(function (row) {
+            wanted[row.clientId] = true;
+            const existing = added[row.clientId];
+            const already = (byStart[Math.round(row.startMs)] || []).some(function (c) {
+                return String(c.text).replace(DIRECTION_MARKS, '') === row.text;
+            });
+            if (existing) {
+                existing.startTime = row.startMs / 1000;
+                existing.endTime = row.endMs / 1000;
+                existing.text = row.text;
+            } else if (!already) {
+                const cue = new window.VTTCue(row.startMs / 1000, row.endMs / 1000, row.text);
+                cue.sqeAdded = row.clientId;
+                track.addCue(cue);
+            }
+        });
+        Object.keys(added).forEach(function (clientId) {
+            if (!wanted[clientId]) {
+                track.removeCue(added[clientId]);
+            }
+        });
+    }
+
+    /** Cue text as jellyfin-web would show it: escaped, line breaks, and <i>, <b>, <u> kept. */
+    function cueMarkup(text) {
+        return text.split('\n').map(function (line) {
+            return line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/&lt;(\/?)([ibu])&gt;/gi, '<$1$2>');
+        }).join('<br>');
+    }
+
+    /** Custom renderer: shows the staged (or, after a save, the saved) text of the line at the current time. */
+    function overlayCustom(element, src) {
+        const t = currentMs();
+        const first = src.cues.filter(function (c) {
+            return c.start <= t && t <= c.end; // jellyfin-web shows the first line in the file that covers the time
+        })[0] || null;
+        const edit = first ? editFor(src, first) : null;
+        const add = src.adds.filter(function (r) {
+            return r.startMs <= t && t <= r.endMs;
+        })[0] || null;
+        let text = null;
+        if (edit) {
+            text = edit.newText;
+        } else if (state.showSavedText || element.sqeOverridden) {
+            text = first ? first.text : (add ? add.text : null);
+        } else if (!first && add) {
+            text = add.text;
+        }
+
+        if (text === null && !element.sqeOverridden) {
+            return; // nothing of ours here: jellyfin-web's text stays
+        }
+
+        element.sqeOverridden = Boolean(edit || state.showSavedText || (!first && add));
+        if (text === null) {
+            element.classList.add('hide');
+        } else {
+            element.innerHTML = cueMarkup(text);
+            element.classList.remove('hide');
+        }
+    }
+
+    function refreshOverlay() {
+        const src = overlaySource();
+        if (!src || !state.video) {
+            return;
+        }
+
+        const renderer = subtitleRenderer();
+        if (renderer === 'native') {
+            overlayNative(manualTrack(state.video), src);
+        } else if (renderer === 'custom') {
+            overlayCustom(customSubtitleElement(), src);
+        }
+    }
+
+    function onVideoTime() {
+        if (subtitleRenderer() === 'custom') {
+            refreshOverlay();
+        }
     }
 
     function anyUnsaved() {
@@ -689,7 +859,7 @@
         renderChanges();
         if (failed === 0) {
             renderCues({ mode: 'active', cues: panel.shown }, staged + removed === 0 ? 'Nothing changed.' :
-                (staged > 0 ? 'Staged. ' : '') + (removed > 0 ? 'Back to the original text, so the change was dropped.' : ''));
+                (staged > 0 ? 'Staged and shown in the player. Save writes it to the file. ' : '') + (removed > 0 ? 'Back to the original text, so the change was dropped.' : ''));
         }
     }
 
@@ -872,7 +1042,7 @@
         persist(panel.target, panel.model);
         renderChanges();
         renderCues(L.cueForTime(panel.loaded.cues, result.row.startMs),
-            form.clientId ? 'New line updated.' : 'New line staged. Save writes it to the file.');
+            form.clientId ? 'New line updated.' : 'New line staged and shown in the player. Save writes it to the file.');
         return true;
     }
 
@@ -1025,6 +1195,7 @@
                 state.panel.loaded = loaded;
             }
 
+            refreshOverlay();
             return loaded;
         });
     }
@@ -1083,6 +1254,7 @@
         apiPost('SubtitleQuickEdit/Items/' + encodeURIComponent(target.itemId) + '/Subtitles/' + target.streamIndex + '/Edits',
             prepared.request).then(function (response) {
             model.applySaveSuccess(prepared.rowIds, response);
+            state.showSavedText = true;
             persist(target, model);
             return refetchCues(target).then(function (loaded) {
                 model.setCues(loaded.cues, loaded.hash);
@@ -1210,6 +1382,7 @@
                     return command(target.streamIndex);
                 }).then(function () {
                     const until = now() + RELOAD_CHECK_MS;
+                    const settled = now() + 1000; // the custom renderer's element is rebuilt only once the file is fetched
                     // Check the lines the panel shows (jellyfin-web may reformat others, for example styled text).
                     const numbers = panel.shown.map(function (c) {
                         return c.index;
@@ -1218,7 +1391,20 @@
                         return numbers.indexOf(c.index) >= 0;
                     });
                     function wait() {
-                        if (trackMatches(manualTrack(state.video), check.length > 0 ? check : loaded.cues)) {
+                        const renderer = subtitleRenderer();
+                        if (renderer === 'native' && trackMatches(manualTrack(state.video), check.length > 0 ? check : loaded.cues)) {
+                            return true;
+                        }
+
+                        if (renderer === 'custom' && now() >= settled) {
+                            // jellyfin-web's own element is back, filled from the file it just fetched; it redraws on
+                            // the next timeupdate, so seek to where the video already is.
+                            state.showSavedText = false;
+                            const video = state.video;
+                            if (video) {
+                                video.currentTime = video.currentTime;
+                            }
+
                             return true;
                         }
 
@@ -1241,12 +1427,13 @@
                 if (!shown) {
                     const track = manualTrack(state.video);
                     if (!track || track.mode === 'disabled') {
-                        throw new Error('The player has no subtitle track to reload.');
+                        throw new Error('the player did not switch the subtitle back on. Choose it again in the subtitle menu.');
                     }
 
                     replaceTrackCues(track, loaded.cues);
                 }
 
+                refreshOverlay(); // staged changes that are not saved yet stay on screen
                 if (state.panel === panel) {
                     setBusy(false);
                     reshow('Subtitles reloaded.');
@@ -1405,6 +1592,9 @@
             // A new playback (jellyfin-web creates a new <video> each time).
             closePanel();
             state.video = video;
+            state.showSavedText = false;
+            video.addEventListener('timeupdate', onVideoTime);
+            video.addEventListener('seeked', onVideoTime);
             state.playbackSeq++;
             state.playbackStartedAt = now();
             state.session = null;
@@ -1451,6 +1641,7 @@
                 menu: state.menu ? Object.assign({}, state.menu) : null,
                 target: state.target ? { itemId: state.target.itemId, streamIndex: state.target.streamIndex } : null,
                 panelOpen: Boolean(state.panel),
+                renderer: state.video ? subtitleRenderer() : null,
                 buttons: document.querySelectorAll('.sqe-edit-button').length,
             };
         },
