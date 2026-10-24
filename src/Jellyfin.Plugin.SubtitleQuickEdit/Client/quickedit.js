@@ -2,7 +2,8 @@
  * Subtitle Quick Edit page code: the edit button in the player and the side panel.
  * Served after logic.js in the same file (see ClientAssetsController), so window.SqeLogic is already defined.
  * What jellyfin-web 12.2 looks like (selectors, load order, Sessions lag) is recorded in docs/client-notes.md.
- * Stage 3d: editing the lines on screen, Previous/Next, Apply and the "Changes this session" list (Save comes in 3e).
+ * Stage 3e: editing, Previous/Next, Apply, the "Changes this session" list, Save, Reload subtitles, conflicts
+ * (409) and drafts that survive a page reload.
  */
 (function () {
     'use strict';
@@ -22,6 +23,8 @@
     const MENU_WINDOW_MS = 60000; // a menu choice counts as a subtitle choice this long after the subtitle button was clicked
     const SESSION_RETRY_MS = [500, 1000, 2000, 4000]; // Sessions may not show the item at the very start of playback
     const REFRESH_DELAY_MS = 100; // coalesces bursts of DOM changes into one refresh
+    const RELOAD_OFF_MS = 1500; // Reload: how long the subtitle stays off before it is switched on again
+    const RELOAD_CHECK_MS = 5000; // Reload: how long to wait for the player to show the saved text before the fallback
     const LOG = '[SubtitleQuickEdit]';
 
     const L = window.SqeLogic;
@@ -39,7 +42,7 @@
         video: null, // the current <video>; a new one is created for every playback
         playbackSeq: 0, // bumped on every new playback, so late answers for an old one are ignored
         playbackStartedAt: 0,
-        session: null, // { itemId, mediaSourceId, subtitleIndex, runtimeMs, requestedAt }
+        session: null, // { id, itemId, mediaSourceId, subtitleIndex, runtimeMs, requestedAt }
         sessionTried: false, // whether this playback's Sessions lookup has been started
         menu: null, // { index, at }: the last subtitle choice made in the subtitle menu
         lastOsdButton: null, // { kind: 'subtitles' | 'other', at }
@@ -83,6 +86,37 @@
         }
 
         return client.getJSON(client.getUrl(path, params));
+    }
+
+    /** POST JSON as the logged-in user; resolves with the parsed answer (or null), rejects with the Response. */
+    /** POSTs body as JSON. Resolves with the parsed reply, or with undefined when noReply (the server answers 204). */
+    function apiPost(path, body, params, noReply) {
+        const client = window.ApiClient;
+        if (!client) {
+            return Promise.reject(new Error('Not connected to the server.'));
+        }
+
+        return client.ajax({
+            type: 'POST',
+            url: client.getUrl(path, params),
+            data: body === undefined ? undefined : JSON.stringify(body),
+            contentType: 'application/json',
+            // ApiClient parses the reply whenever dataType is 'json', and an empty 204 reply then fails to parse.
+            dataType: body === undefined || noReply ? undefined : 'json',
+        });
+    }
+
+    /** The status and error body of a rejected request: { status, body } (status 0 when it never reached the server). */
+    function errorDetails(err) {
+        if (err && typeof err.status === 'number' && typeof err.json === 'function') {
+            return err.json().then(function (body) {
+                return { status: err.status, body: body || {} };
+            }, function () {
+                return { status: err.status, body: {} };
+            });
+        }
+
+        return Promise.resolve({ status: 0, body: { message: (err && err.message) || 'The request failed.' } });
     }
 
     /** A readable message from a rejected request: the plugin's error body when there is one. */
@@ -161,6 +195,7 @@
 
             const ticks = mine.NowPlayingItem.RunTimeTicks;
             state.session = {
+                id: mine.Id,
                 itemId: mine.NowPlayingItem.Id,
                 mediaSourceId: mine.PlayState.MediaSourceId,
                 subtitleIndex: typeof mine.PlayState.SubtitleStreamIndex === 'number' ? mine.PlayState.SubtitleStreamIndex : -1,
@@ -362,6 +397,31 @@
         removeButtons(floating);
     }
 
+    // ---- drafts: staged changes survive a page reload ---------------------------------------------------------------
+
+    const drafts = L.createDraftStore(function () {
+        return window.localStorage;
+    });
+
+    function persist(target, model) {
+        drafts.save(state.userId, target.itemId, target.streamIndex, model.serialize());
+    }
+
+    function anyUnsaved() {
+        return Object.keys(state.models).some(function (key) {
+            return state.models[key].hasUnsaved();
+        });
+    }
+
+    // Leaving or reloading the page with unsaved changes asks first. (The drafts are kept either way and come back
+    // the next time the panel opens on that subtitle.)
+    window.addEventListener('beforeunload', function (e) {
+        if (anyUnsaved()) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+
     // ---- the panel -------------------------------------------------------------------------------------------------
 
     function cacheKey(target) {
@@ -382,13 +442,27 @@
             });
     }
 
-    /** The staged changes of a track. Kept for the life of the page, so closing the panel does not lose them. */
+    /**
+     * The staged changes of a track. Kept for the life of the page, so closing the panel does not lose them; the first
+     * time, a draft left by an earlier page is restored. Returns { model, restored } (restored: a status note or null).
+     */
     function modelFor(target, loaded) {
         const key = cacheKey(target);
         let model = state.models[key];
+        let restored = null;
         if (!model) {
             model = new L.StagingModel({ runtimeMs: state.session ? state.session.runtimeMs : null });
-            model.setCues(loaded.cues, loaded.hash);
+            const draft = drafts.load(state.userId, target.itemId, target.streamIndex);
+            if (draft) {
+                const summary = model.restore(draft, loaded.cues, loaded.hash);
+                if (summary.restored.length + summary.failed.length > 0) {
+                    restored = 'Restored ' + summary.restored.length + ' unsaved change' + (summary.restored.length === 1 ? '' : 's') +
+                        ' from before.' + (summary.failed.length > 0 ? ' ' + summary.failed.length + ' no longer match the file.' : '');
+                }
+            } else {
+                model.setCues(loaded.cues, loaded.hash);
+            }
+
             state.models[key] = model;
         } else if (model.baseHash !== loaded.hash) {
             // The file changed since these edits were staged: keep what still matches, mark the rest failed.
@@ -397,7 +471,8 @@
             model.setCues(loaded.cues, loaded.hash);
         }
 
-        return model;
+        persist(target, model);
+        return { model: model, restored: restored };
     }
 
     function button(className, text, title, onClick) {
@@ -437,8 +512,14 @@
         }));
         const cues = el('div', 'sqe-cues');
         const actions = el('div', 'sqe-actions');
-        actions.appendChild(button('sqe-apply sqe-primary', 'Apply', 'Stage the change (Ctrl+Enter)', function () {
+        actions.appendChild(button('sqe-apply', 'Apply', 'Stage the change (Ctrl+Enter)', function () {
             applyEdits();
+        }));
+        actions.appendChild(button('sqe-save sqe-primary', 'Save', 'Write the staged changes to the file (Ctrl+S)', function () {
+            saveChanges();
+        }));
+        actions.appendChild(button('sqe-reload', 'Reload subtitles', 'Make the player show the saved file', function () {
+            reloadSubtitles();
         }));
         const changes = el('section', 'sqe-changes');
         const changesTitle = el('h3', 'sqe-changes-title', 'Changes this session');
@@ -595,6 +676,7 @@
                 removed++;
             }
         });
+        persist(panel.target, panel.model);
         renderChanges();
         if (failed === 0) {
             renderCues({ mode: 'active', cues: panel.shown }, staged + removed === 0 ? 'Nothing changed.' :
@@ -627,6 +709,7 @@
             const undo = button('sqe-undo', 'Undo', 'Drop this change', function (e) {
                 e.stopPropagation();
                 state.panel.model.undo(row.rowId);
+                persist(state.panel.target, state.panel.model);
                 renderChanges();
                 renderCues({ mode: 'active', cues: state.panel.shown }, 'Change dropped.');
             });
@@ -664,6 +747,246 @@
             panel.list.appendChild(changeRow(row));
         });
         panel.changes.hidden = rows.length === 0;
+        panel.actions.querySelector('.sqe-save').disabled = panel.busy || !rows.some(function (r) {
+            return r.status === 'staged';
+        });
+    }
+
+    /** Fetches the cues again (after a save or a conflict) and makes them the panel's. */
+    function refetchCues(target) {
+        delete state.cues[cacheKey(target)];
+        return loadCues(target).then(function (loaded) {
+            if (state.panel && state.panel.target === target) {
+                state.panel.loaded = loaded;
+            }
+
+            return loaded;
+        });
+    }
+
+    function setBusy(busy) {
+        const panel = state.panel;
+        panel.busy = busy;
+        panel.actions.querySelectorAll('button').forEach(function (b) {
+            b.disabled = busy;
+        });
+        if (!busy) {
+            renderChanges();
+        }
+    }
+
+    /** Re-shows the lines the panel showed, by cue number, from the panel's current cues. */
+    function reshow(note) {
+        const panel = state.panel;
+        const numbers = panel.shown.map(function (c) {
+            return c.index;
+        });
+        const cues = panel.loaded.cues.filter(function (c) {
+            return numbers.indexOf(c.index) >= 0;
+        });
+        renderCues({ mode: 'active', cues: cues.length > 0 ? cues : panel.shown }, note);
+    }
+
+    /** Sends every staged change in one request (the Save button and Ctrl+S). */
+    function saveChanges() {
+        const panel = state.panel;
+        if (!panel || !panel.model || panel.busy) {
+            return;
+        }
+
+        applyEdits(); // a text box that was changed but not applied yet is saved too
+        const model = panel.model;
+        const target = panel.target;
+        const prepared = model.prepareSave();
+        if (!prepared) {
+            showStatus('Nothing is staged.');
+            return;
+        }
+
+        setBusy(true);
+        showStatus('Saving\u2026');
+        apiPost('SubtitleQuickEdit/Items/' + encodeURIComponent(target.itemId) + '/Subtitles/' + target.streamIndex + '/Edits',
+            prepared.request).then(function (response) {
+            model.applySaveSuccess(prepared.rowIds, response);
+            persist(target, model);
+            return refetchCues(target).then(function (loaded) {
+                model.setCues(loaded.cues, loaded.hash);
+                if (state.panel === panel) {
+                    setBusy(false);
+                    reshow('Saved ' + prepared.rowIds.length + ' change' + (prepared.rowIds.length === 1 ? '' : 's') +
+                        '. Press Reload subtitles to see it on screen.');
+                }
+            });
+        }, function (err) {
+            return errorDetails(err).then(function (details) {
+                const outcome = model.applySaveError(prepared.rowIds, details.status, details.body);
+                if (outcome.action === 'reconcile') {
+                    return refetchCues(target).then(function (loaded) {
+                        const summary = model.reconcile(loaded.cues, loaded.hash);
+                        persist(target, model);
+                        if (state.panel === panel) {
+                            setBusy(false);
+                            reshow('The file changed on disk since it was loaded, so nothing was saved. ' +
+                                (summary.failed.length > 0
+                                    ? summary.failed.length + ' change' + (summary.failed.length === 1 ? '' : 's') +
+                                      ' no longer match the file (marked failed); the rest are still staged.'
+                                    : 'Your changes still match the file: press Save again.'));
+                            showStatus(panel.status.textContent, true);
+                        }
+                    });
+                }
+
+                persist(target, model);
+                if (state.panel === panel) {
+                    setBusy(false);
+                    reshow();
+                    showStatus(outcome.action === 'marked' ? 'Nothing was saved: a change was refused (see the list).'
+                        : 'Nothing was saved: ' + outcome.message, true);
+                }
+
+                return null;
+            });
+        }).catch(function (err) {
+            if (state.panel === panel) {
+                setBusy(false);
+                return describeError(err).then(function (message) {
+                    showStatus('Something went wrong after saving: ' + message, true);
+                });
+            }
+
+            return null;
+        });
+    }
+
+    function manualTrack(video) {
+        const tracks = video && video.textTracks;
+        for (let i = 0; tracks && i < tracks.length; i++) {
+            if (tracks[i].label === TEXT_TRACK_LABEL) {
+                return tracks[i];
+            }
+        }
+
+        return null;
+    }
+
+    /** True when the player's text track holds each of these cues' text as the file has it now (direction marks aside). */
+    function trackMatches(track, cues) {
+        if (!track || !track.cues) {
+            return false;
+        }
+
+        const wanted = {};
+        cues.forEach(function (c) {
+            wanted[Math.round(c.start) + ':' + c.text] = true;
+        });
+        const strip = /[\u200e\u200f\u202a-\u202e]/g;
+        let found = 0;
+        for (let i = 0; i < track.cues.length; i++) {
+            const c = track.cues[i];
+            if (wanted[Math.round(c.startTime * 1000) + ':' + String(c.text).replace(strip, '')]) {
+                found++;
+            }
+        }
+
+        return found >= cues.length;
+    }
+
+    /** Fallback: puts the file's cues straight into the player's text track. */
+    function replaceTrackCues(track, cues) {
+        Array.prototype.slice.call(track.cues || []).forEach(function (c) {
+            track.removeCue(c);
+        });
+        cues.forEach(function (c) {
+            track.addCue(new window.VTTCue(c.start / 1000, c.end / 1000, c.text));
+        });
+    }
+
+    function delay(ms) {
+        return new Promise(function (resolve) {
+            setTimeout(resolve, ms);
+        });
+    }
+
+    /**
+     * Makes the player show the file as saved. The server tells this page's player to switch the subtitle off and on
+     * again (it then fetches the track again); if the player's track still differs after a few seconds, the cues are
+     * put into the track directly. Playback position and pause state are kept.
+     */
+    function reloadSubtitles() {
+        const panel = state.panel;
+        const session = state.session;
+        if (!panel || !panel.target || panel.busy) {
+            return;
+        }
+
+        const target = panel.target;
+        setBusy(true);
+        showStatus('Reloading subtitles\u2026');
+        function command(index) {
+            return apiPost('Sessions/' + encodeURIComponent(session.id) + '/Command',
+                { Name: 'SetSubtitleStreamIndex', Arguments: { Index: String(index) } }, undefined, true);
+        }
+
+        refetchCues(target).then(function (loaded) {
+            const viaServer = session && session.id
+                ? command(-1).then(function () {
+                    return delay(RELOAD_OFF_MS);
+                }).then(function () {
+                    return command(target.streamIndex);
+                }).then(function () {
+                    const until = now() + RELOAD_CHECK_MS;
+                    // Check the lines the panel shows (jellyfin-web may reformat others, for example styled text).
+                    const numbers = panel.shown.map(function (c) {
+                        return c.index;
+                    });
+                    const check = loaded.cues.filter(function (c) {
+                        return numbers.indexOf(c.index) >= 0;
+                    });
+                    function wait() {
+                        if (trackMatches(manualTrack(state.video), check.length > 0 ? check : loaded.cues)) {
+                            return true;
+                        }
+
+                        return now() >= until ? false : delay(250).then(wait);
+                    }
+
+                    return wait();
+                }, function () {
+                    // A command failed; the subtitle may have been switched off already, so ask for it once more.
+                    return command(target.streamIndex).then(function () {
+                        return delay(RELOAD_OFF_MS);
+                    }, function () {
+                        return null;
+                    }).then(function () {
+                        return false;
+                    });
+                })
+                : Promise.resolve(false);
+            return viaServer.then(function (shown) {
+                if (!shown) {
+                    const track = manualTrack(state.video);
+                    if (!track || track.mode === 'disabled') {
+                        throw new Error('The player has no subtitle track to reload.');
+                    }
+
+                    replaceTrackCues(track, loaded.cues);
+                }
+
+                if (state.panel === panel) {
+                    setBusy(false);
+                    reshow('Subtitles reloaded.');
+                }
+            });
+        }).catch(function (err) {
+            if (state.panel === panel) {
+                setBusy(false);
+                return describeError(err).then(function (message) {
+                    showStatus('Could not reload the subtitles: ' + message, true);
+                });
+            }
+
+            return null;
+        });
     }
 
     function openPanel() {
@@ -703,9 +1026,11 @@
                 const t = L.secondsToMs(state.video ? state.video.currentTime : 0);
                 state.panel.target = target;
                 state.panel.loaded = loaded;
-                state.panel.model = modelFor(target, loaded);
+                const made = modelFor(target, loaded);
+                state.panel.model = made.model;
                 renderChanges();
-                renderCues(L.cueForTime(loaded.cues, t === null ? 0 : t));
+                const shown = L.cueForTime(loaded.cues, t === null ? 0 : t);
+                renderCues(shown, made.restored === null ? undefined : made.restored);
             });
         }).catch(function (err) {
             return describeError(err).then(function (message) {
@@ -717,6 +1042,10 @@
     function closePanel() {
         if (!state.panel) {
             return;
+        }
+
+        if (state.panel.model) {
+            state.panel.model.dropSaved(); // saved rows stay in the list only while the panel is open
         }
 
         state.panel.root.remove();
@@ -751,7 +1080,8 @@
                 e.preventDefault();
                 applyEdits();
             } else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
-                e.preventDefault(); // Save comes in stage 3e; never the browser's save dialog
+                e.preventDefault(); // never the browser's save dialog
+                saveChanges();
             }
         }
 
