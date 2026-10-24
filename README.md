@@ -30,6 +30,9 @@ settings from the environment (see `devtools/env.sh`; there are no defaults, a m
 | `SQE_CONTAINER` | Optional: test server container name (default `jellyfin-test`) | |
 | `SQE_DIR` | Optional: synced project folder on the host (default `$SQE_TEST_ROOT/src/sqe`) | |
 
+A convenient place for them is an untracked `local.env` in the repo root (git-ignored, as is `*.local`), with
+`export SQE_HOST_EXEC=...` lines, loaded with `. ./local.env` before running the scripts. Keep secrets out of it.
+
 `<secrets-dir>` in the docs is any mode-700 folder for the test server's admin password and tokens; it is never committed.
 
 - Unit tests: `devtools/sync.sh && devtools/dotnet.sh test -c Release` (needs the test host, see below). Some tests need
