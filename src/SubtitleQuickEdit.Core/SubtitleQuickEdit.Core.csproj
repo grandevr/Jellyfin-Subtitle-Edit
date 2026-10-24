@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SubtitleQuickEdit.Core</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Needed by the LibraryImport-generated P/Invoke stubs in Storage/UnixFileMetadata.cs. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same detector and version as Jellyfin 12.2's SubtitleEncoder (UTF.Unknown 2.7.0). -->
+    <PackageReference Include="UTF.Unknown" Version="2.7.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="StyleCop.Analyzers" Version="1.2.0-beta.556" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SubtitleQuickEdit.Core.Tests" />
+  </ItemGroup>
+
+</Project>
