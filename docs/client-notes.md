@@ -3,7 +3,7 @@
 Recorded in stage 3a (2026-10-24) against Jellyfin 12.2.0 and the web client it ships, with headless Chromium driven by
 Playwright 1.64.1 on a throwaway test server, logged in as an administrator through the login form. The item played was a
 60 s WebM (VP9 video, Opus audio) by direct play, with two external `.srt` tracks (English index 0, Polish index 1). The
-layout was desktop (`html.layout-desktop`, viewport 1280x720). The phone layout is not recorded yet (stage 3g).
+layout was desktop (`html.layout-desktop`, viewport 1280x720). Later sections add what stages 3d to 3g found.
 
 Everything below was observed, not read from the jellyfin-web source. Selectors can change between releases, so the client
 keeps them in one constants block and falls back to a floating button.
@@ -181,10 +181,40 @@ video is 2), `MediaSourceId` = the item id, `NowPlayingItem.Id` = the item id, `
 4. The OSD hides after about 3 s without mouse movement, and keys do not show it; clicking only works while it is shown.
 5. There is one text track named `manualTrack` whose cues are replaced when the track changes; the subtitle element is the
    browser's own rendering, so "replace the cues in the active text track" (reload option c) acts on that one track.
-6. The subtitle menu has a *Secondary Subtitles* entry the spec does not mention. With a secondary track selected it is
-   not known which cue text is on screen; to be decided.
+6. The subtitle menu has a *Secondary Subtitles* entry the spec does not mention. The client follows the primary track
+   only: a secondary choice is ignored, and the panel always edits the primary track.
 7. `ApiClient.isWebSocketOpen()` is unusable; the page's own socket is the live one.
 8. File Transformation runs one pipeline per request, so the plugin's choice of the plain key `index.html` matters when other
    plugins also transform the index page.
 9. Not yet checked: playing an item with alternate versions (the spec hides the button when `MediaSourceId` differs from the
-   item id), a burned-in subtitle, the phone layout, and a client other than Chromium.
+   item id), a burned-in subtitle, and a client other than Chromium (stage 3g's hand test covers a desktop browser).
+
+## Reload subtitles (stage 3d spike, used from 3e)
+
+`testdata/browser/reload_spike.py` changed one line on disk and tried three ways to make the paused player show it. All
+three updated the on-screen text and kept the position and the pause:
+
+- A: `POST /Sessions/{id}/Command` with `{"Name":"SetSubtitleStreamIndex","Arguments":{"Index":"-1"}}`, 1.5 s later the
+  track's index again. jellyfin-web's `serverNotifications` hands it to `playbackManager.setSubtitleStreamIndex`, which
+  fetches the external track again.
+- B: the OSD subtitle menu, Off and then the track.
+- C: replacing the cues of `manualTrack` with the plugin's Cues (`new VTTCue(start/1000, end/1000, text)`).
+
+The client uses A, because it goes through jellyfin-web's own loading (subtitle offset, styling). If the shown cues don't
+match the file within 5 s it falls back to C. jellyfin-web prefixes each cue's text with a direction mark (U+200E), so
+comparisons strip those.
+
+## `ApiClient.ajax` and empty replies
+
+`ApiClient.ajax({ dataType: 'json' })` parses the reply whenever `dataType` is `'json'`, and an empty reply then
+rejects. `POST /Sessions/{id}/Command` answers 204 with no body. The first 3e build asked for JSON there, so the Off
+command was carried out but treated as failed, and the On command was never sent: Reload left subtitles off. The
+client's `apiPost` takes `noReply` for such calls. It also rejects (with the `Response`) on any status of 400 or more.
+
+## Phone width (stage 3g)
+
+Checked in headless Chromium at 390x844 with touch (`stage3_tests.py`, `admin_phone`): the button shows in the OSD row,
+the panel is a full-width bottom sheet of at most 60 % of the height, so the video stays visible above it. Every panel
+button is at least 44 px high, the time fields of the new-line form fit on one row each, and nothing scrolls sideways.
+Taps work like clicks. The 44 px rule applies under 600 px or on a coarse pointer (touch screens of any size).
+

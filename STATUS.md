@@ -1,16 +1,18 @@
-# Subtitle Quick Edit: status (project ON HOLD after stage 2, 2026-10-16)
+# Subtitle Quick Edit: status (stage 3 done, 2026-10-24; waiting on the hand test)
 
 Spec: the "Jellyfin Subtitle Quick-Edit Plugin — Spec" doc (claude.ai artifact YP25tXFeL6JFKs3i32VdNx). Read it again
 before resuming: it is the source of truth and was updated after every stage. Nothing has been installed on the live
 Jellyfin or touched on the live Bazarr. All work is on a throwaway Jellyfin on the test host.
 
-## State at the pause
+## State now
 
 - Solution builds clean (0 warnings, 0 errors, `TreatWarningsAsErrors`, `AnalysisMode=AllEnabledByDefault`, no rule relaxed).
-- 248 of 248 unit tests pass with `SQE_REQUIRE_INTEGRATION=1` (nothing silently skipped).
-- 75 of 75 API checks pass against the test server (`testdata/stage2_api_tests.py`).
-- Mutation check: control passes, 17 of 17 mutants killed.
-- Nothing is half-applied. The fixtures on the test server are pristine (the API test script resets them when it ends).
+- Server: 248 of 248 unit tests (with `SQE_REQUIRE_INTEGRATION=1`), 75 of 75 API checks, mutation check 17 of 17 (stage 2).
+- Client: 158 Node tests (`Client/test`), client mutation check 38 of 38, fake-page smoke test 35 of 35, and the browser
+  tests against the test server (`testdata/browser/stage3_tests.py`): 42 of 42 at stage 3f, plus the 3g phone checks.
+- The test subtitles are pristine after every browser run (TestWebm 01 restored through the API; TestWebm 03's `.en.srt`
+  by `testdata/reset_webm03_srt.sh`).
+- Plugin version is still 0.2.0.0; it is bumped at packaging (stage 6).
 
 ## Done
 
@@ -45,49 +47,34 @@ Jellyfin or touched on the live Bazarr. All work is on a throwaway Jellyfin on t
   the item (`IsVisibleStandalone`: library access included; a defect here was found by the API tests and fixed).
 - Oversize requests answer 413 (body read by hand: Jellyfin's middleware turns Kestrel's exception into a 500).
 
-## Next: stage 3, the client script (from the spec)
+**Stage 3: the client script** (`src/Jellyfin.Plugin.SubtitleQuickEdit/Client`, PRs #5 to #9 and the 3g PR)
+- 3a: the plugin serves `quickedit.js` (logic.js + quickedit.js) and `quickedit.css` anonymously and registers an
+  `index.html` transformation with File Transformation by reflection. What jellyfin-web 12.2 really does is recorded in
+  `docs/client-notes.md`.
+- 3b: `logic.js`, a page-free module with the time, cue lookup, validation, staging, conflict and draft logic (Node tests).
+- 3c: the edit button next to the subtitle button (floating fallback), admin check, Sessions lookup plus menu tracking,
+  side panel (bottom sheet under 600 px), key isolation.
+- 3d: one text box per cue on screen, Previous/Next with seek, Apply, "Changes this session" with Undo and click-to-seek.
+- 3e: Save (one request), 409 handling, Reload subtitles (session command off/on, fallback: replace the track's cues),
+  drafts in `localStorage`, leave-page prompt, Ctrl+S.
+- 3f: Add line (prefill, Set to now, ±100 ms, Preview, overlap warning, reopen from the list, renumbering after save).
+- 3g: 44 px touch targets, focus rings, contrast checked by a test, phone-width checks, docs.
 
-Test on the test server only; deploy to live only after the whole acceptance checklist passes and with the user's approval.
-- **Injection:** a JS file and CSS served by the plugin, injected into jellyfin-web through the File Transformation plugin
-  (3.0.2.0 or later, registered by reflection: it cannot be referenced as a library). The plugin never patches
-  `index.html`. If File Transformation is missing or fails, log a clear error and keep the server API working.
-- **Button:** in the player's bottom control bar next to the subtitle button; shown only when the active subtitle track is an
-  editable external `.srt` and the user is an admin (or submissions are on and the user has access to the item).
-  `MutationObserver`; fallback floating button; all selectors in one constants block at the top of the file.
-- **Panel:** right side panel on desktop, full-width bottom sheet under about 600 px. Esc closes, Ctrl+Enter applies, Ctrl+S
-  saves; key events never reach the player while the panel has focus (no space/f shortcuts while typing).
-- **Flow:** click pauses and opens the panel with the cue at the current time (nearest previous if none; each overlapping cue
-  gets its own box); Previous/Next step cues and seek; Apply stages an edit; Save sends everything in one request; Reload
-  subtitles switches the track off and on (fallback: reload the video at the current position).
-- **Add line:** start = now, end = start + 2 s or the next cue's start if sooner (minimum 0.5 s); `hh:mm:ss,mmm` fields, "Set to
-  now", ±100 ms nudges, Preview (from 1 s before start to the end), non-blocking overlap warning; a staged new line can be
-  reopened from the list.
-- **"Changes this session" list:** cue number and start (click seeks), old and new text (or "New" with times and text),
-  undo, status staged/saved/failed; editing a cue twice updates its row; saved rows stay until the panel closes or the page reloads.
-- **State:** item/track/position from `GET /Sessions` (this device's id) with `<video>.currentTime` when there is a `<video>`
-  element, otherwise Sessions API for position, pause and seek; cues from the Cues endpoint, cached until Save or Reload;
-  staged edits kept in `localStorage` per item and stream (try/catch); confirm prompt when leaving with unsaved edits.
-- **Save results:** success marks rows saved and stores the new hash; 409 re-fetches cues, keeps staged edits whose
-  `oldText` still matches, marks the rest failed, and always keeps staged new lines; after adds, renumber the list using the
-  `clientId` mapping.
-- **Tests:** acceptance checklist sections 1 and 2 plus "typing in the panel never triggers player shortcuts", by browser
-  automation at desktop and phone width; then you test a desktop browser (required) and the Android app's web player (best
-  effort). iOS and Jellyfin Media Player are out of scope. Stages 4 (submissions and review) and 6 (acceptance, packaging,
-  deployment) follow; Bazarr is dropped from v1 entirely.
+## Next
+
+1. **Hand test** (required): a desktop browser against the test server, then the Android app's web player (best effort).
+2. Remove the Playwright image from the test host once stage 3 is accepted (it can be rebuilt for stage 4).
+3. Stage 4: submissions and review for non-admins. Stage 6: acceptance, packaging, deployment (only with approval).
 
 ## Open decisions
 
-1. **Secrets location.** The test secrets live in the session scratchpad (below), which is session-specific temporary
-   storage and may be gone when the work resumes. They are throwaway, but your rule is that passwords live in your password
-   manager. Options: re-create the users and tokens on resume (a few commands, below), or keep a mode-600 secrets folder in
-   the project for the test server only. Your call.
-2. **Automated browser tests.** Stage 3 needs a headless browser against the test server. The plan was a Playwright container
-   on the test host (an image of roughly 1 to 2 GB; the test host had about 16 GB free). Approve that, or choose manual-only testing.
-3. **Teardown** (below) happens only when the project is finished; confirm the list then.
-4. **Not decided yet, needed at deployment:** installing File Transformation on the live Jellyfin is a deployment step, and
+1. **Teardown** (below) happens only when the project is finished; confirm the list then.
+2. **Not decided yet, needed at deployment:** installing File Transformation on the live Jellyfin is a deployment step, and
    restarting the live Jellyfin interrupts playback (done only with approval).
+3. Known limits to decide on later: an item with alternate versions, a burned-in subtitle and the Secondary Subtitles menu
+   are not handled specially yet (see `docs/client-notes.md`).
 
-## Test server (the test host, throwaway, STOPPED at the pause, nothing removed)
+## Test server (the test host, throwaway)
 
 - Container `jellyfin-test` (`--restart no`), LAN-only port 8097, image pinned by digest to the live image
   (`lscr.io/linuxserver/jellyfin@sha256:799509f8ef3be7037478699cc6fd14d19dd75faac5e474ed219e98ae78a5b3e4`, 12.2.0). UPnP is off.
@@ -107,6 +94,11 @@ Test on the test server only; deploy to live only after the whole acceptance che
   `testadmin` with that password to get a token, delete `testuser` and `limiteduser`, and re-run
   `testdata/create_test_users.py` (it skips users that already exist).
 - Reset fixtures any time: `testdata/reset_fixtures.sh`.
+- Library `TestWebm` (`testdata/make_webm.sh`): VP9/Opus copies of episodes 1 and 2 with their English and Polish `.srt`,
+  and a 30 s third movie with an embedded subtitle, a `.de.vtt` and an `.en.srt`. Playwright's Chromium cannot play H.264,
+  so the browser tests use these.
+- Browser tests run in a Playwright for Python image built on the test host (`sqe-playwright:1.64.1`), from a copy of
+  `testdata/browser` there (`devtools/sync.sh` skips `testdata/`).
 
 ## Commands to resume (each is one line; run from the project folder)
 
@@ -122,13 +114,17 @@ Run `. devtools/env.sh` first (with the settings from `local.env`) so that `sqe_
 - Restart the test server to load it: `sqe_host docker restart jellyfin-test`
 - API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>`
 - Mutation check (about 8 minutes): `python3 -I devtools/mutation_check.py` (needs `$SQE_TEST_ROOT/src/sqe-mut`, created with `sqe_host mkdir $SQE_TEST_ROOT/src/sqe-mut` and `sqe_host chown 1000:1000 $SQE_TEST_ROOT/src/sqe-mut`)
+- Client tests (no server): `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js`, then
+  `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` and, with Playwright for Node,
+  `node testdata/browser/fake_page_smoke.js`
+- Browser tests on the TEST server: reset TestWebm 03 first and after (`sqe_host docker exec -i -u 1000 "$SQE_CONTAINER" sh -s < testdata/reset_webm03_srt.sh`),
+  then run `stage3_tests.py` in the Playwright image with the testadmin and testuser passwords on stdin (see the file's header)
 - Stop the test server again: `sqe_host docker stop jellyfin-test`
 
 ## Teardown when the project is finished (nothing below is done yet)
 
 `docker rm -f jellyfin-test` on the test host; `rm -rf $SQE_TEST_ROOT` (config, media, source copy and the gid-2000 fixture);
-`docker rmi` of the pinned Jellyfin image and of `mcr.microsoft.com/dotnet/sdk:10.0` (and the Playwright image if one is
-pulled); delete the scratchpad secrets. Nothing from this project exists on the live Jellyfin yet, so there is nothing to undo there.
+`docker rmi` of the pinned Jellyfin image, of `mcr.microsoft.com/dotnet/sdk:10.0` and of the Playwright image; delete the test secrets folder. Nothing from this project exists on the live Jellyfin yet, so there is nothing to undo there.
 
 ## Gotchas learned
 
@@ -137,6 +133,8 @@ pulled); delete the scratchpad secrets. Nothing from this project exists on the 
 - Jellyfin drops an external `.srt` that ffprobe cannot read at scan time; a `FullRefresh` (not `ValidationOnly`) retries a file it
   rejected earlier. `ValidationOnly` is enough to pick up a newly added file.
 - Jellyfin omits null JSON properties (a track without a language has no `language` key).
+- `ApiClient.ajax` with `dataType: 'json'` rejects on an empty 204 reply (the session command): see `docs/client-notes.md`.
+- `GET /Sessions` shows a subtitle change about 6 s late; the client follows the subtitle menu clicks meanwhile.
 - The Read tool is blocked outside the working directory (`blockReadsOutsideWorkingDirectories`); the project now lives inside it.
 - `STAGE0-NOTES.md`, `upstream-template/`, `template-bump/` and `upstream-template.tar.gz` in the project root are stage 0
   reference material and can be deleted when the project is finished.

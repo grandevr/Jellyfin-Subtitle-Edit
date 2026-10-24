@@ -231,6 +231,23 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
     (await rows()).some((r) => r.indexOf('Line 2 (new)') === 0 && r.endsWith('|saved'));
   info.fileNow = fileNow;
 
+  // 3g: at phone width the form fits, and every button is a 44 px touch target.
+  await p.setViewportSize({ width: 390, height: 844 });
+  await p.click('.sqe-add');
+  const phone = await p.evaluate(() => {
+    const panel = document.querySelector('.sqe-panel');
+    const small = Array.from(panel.querySelectorAll('button')).filter((b) => b.getClientRects().length > 0)
+      .filter((b) => b.getBoundingClientRect().height < 44).map((b) => b.className);
+    const rows = Array.from(panel.querySelectorAll('.sqe-time-row')).map((r) =>
+      new Set(Array.from(r.children).map((c) => Math.round(c.getBoundingClientRect().top))).size);
+    return { small, rows, overflow: panel.scrollWidth - panel.clientWidth };
+  });
+  checks['phone width: buttons are at least 44 px high, time rows fit, no sideways scroll'] =
+    phone.small.length === 0 && phone.rows.join() === '1,1' && phone.overflow <= 0;
+  info.phone = phone;
+  await p.click('.sqe-cancel');
+  await p.setViewportSize({ width: 1280, height: 720 });
+
   await p.focus('.sqe-cue-text');
   await p.keyboard.press('Escape');
   checks['Esc closed the panel'] = !(await p.$('.sqe-panel'));
