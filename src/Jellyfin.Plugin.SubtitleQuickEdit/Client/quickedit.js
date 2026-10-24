@@ -1187,6 +1187,28 @@
                 renderCues({ mode: 'active', cues: state.panel.shown }, 'Change dropped.');
             });
             item.appendChild(undo);
+        } else if (row.type === 'edit') {
+            const undoSaved = button('sqe-undo-saved', 'Undo', 'Stage the old text again (Save writes it)', function (e) {
+                e.stopPropagation();
+                const panel = state.panel;
+                const result = panel.model.undoSaved(row.rowId);
+                if (!result.ok) {
+                    showStatus(result.error, true);
+                    return;
+                }
+
+                persist(panel.target, panel.model);
+                renderChanges();
+                const cue = panel.loaded.cues.filter(function (c) {
+                    return c.index === row.cueIndex;
+                })[0];
+                if (cue) {
+                    showCue(cue);
+                }
+
+                showStatus('The old text is staged and shown in the player. Save writes it to the file.');
+            });
+            item.appendChild(undoSaved);
         }
 
         item.tabIndex = 0;
@@ -1319,8 +1341,7 @@
                 model.setCues(loaded.cues, loaded.hash);
                 if (state.panel === panel) {
                     setBusy(false);
-                    reshow('Saved ' + prepared.rowIds.length + ' change' + (prepared.rowIds.length === 1 ? '' : 's') +
-                        '. Press Reload subtitles to see it on screen.');
+                    reshow('Saved ' + prepared.rowIds.length + ' change' + (prepared.rowIds.length === 1 ? '' : 's') + '.');
                 }
             });
         }, function (err) {

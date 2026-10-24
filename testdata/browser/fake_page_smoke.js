@@ -290,6 +290,16 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   await p.click('.sqe-cancel');
   await p.setViewportSize({ width: 1280, height: 720 });
 
+  // Undo on a saved change stages the old text again; on a line changed again since, it says why it cannot.
+  const undoSavedOn = (text) => p.evaluate((t) => Array.from(document.querySelectorAll('.sqe-change-saved'))
+    .find((r) => r.querySelector('.sqe-change-new').textContent === t).querySelector('.sqe-undo-saved').click(), text);
+  await undoSavedOn('Hello draft');
+  checks['Undo on a saved change to a line that changed since is refused with a reason'] =
+    (await status()).indexOf('changed again') > 0 && !(await rows()).some((r) => r.endsWith('|staged'));
+  await undoSavedOn('Hello again');
+  checks['Undo on a saved change stages the old text and shows it in the player'] =
+    (await rows()).some((r) => r.indexOf('|Hello draft|staged') > 0) && (await trackTexts()).split('|')[0] === 'Hello draft';
+
   // Revert to original: puts back the file as this tab first loaded it, drops every change, reloads the subtitles.
   const revertShown = () => p.$eval('.sqe-revert', (e) => !e.hidden);
   checks['Revert to original is offered once the file differs from the original'] = await revertShown();

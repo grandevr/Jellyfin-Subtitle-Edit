@@ -409,3 +409,20 @@ test('clear forgets every row, saved ones included', () => {
     assert.equal(m.hasUnsaved(), false);
     assert.equal(m.baseHash, 'h1');
 });
+
+test('undoSaved stages the old text of a saved edit, and refuses when the line changed since', () => {
+    const m = new L.StagingModel();
+    m.setCues([{ index: 1, start: 0, end: 1000, text: 'Old' }], 'h0');
+    m.stageEdit(m.cues[0], 'New');
+    m.applySaveSuccess(['e1'], { hash: 'h1', savedCueIndexes: [1], addedCues: {} });
+    m.setCues([{ index: 1, start: 0, end: 1000, text: 'New' }], 'h1');
+    const r = m.undoSaved('e1');
+    assert.equal(r.ok, true);
+    assert.equal(r.row.oldText, 'New');
+    assert.equal(r.row.newText, 'Old');
+    assert.equal(r.row.status, 'staged');
+    m.setCues([{ index: 1, start: 0, end: 1000, text: 'Something else' }], 'h2');
+    m.undo(r.row.rowId);
+    assert.equal(m.undoSaved('e1').ok, false);
+    assert.equal(m.undoSaved('nope').ok, false);
+});
