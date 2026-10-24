@@ -230,3 +230,12 @@ The client now handles both: `subtitleRenderer()` says `native`, `custom` or `no
 accepts the custom element coming back and seeks to the current time so jellyfin-web redraws it. Staged changes are shown
 before saving: in a native track by changing the cue text (new lines are added as cues), in the custom renderer by
 writing the element after jellyfin-web's own `timeupdate` handler (registered earlier, so it runs first).
+
+## Revert to original
+
+"The original" is the file as this browser tab first loaded it: the hash from the first Cues answer for a track is kept
+in sessionStorage (`sqe-baseline:{userId}:{itemId}:{streamIndex}`, also in memory when storage is blocked), so it
+survives a page reload but not a new tab. A save whose `baseHash` is that hash sends `keepRestorePoint`, and the server
+keeps the file as it was. "Revert to original" (shown when there are unsaved changes or the file differs from the
+original) asks first, then posts Restore with the current hash and the original's, drops every row in the changes
+list, and runs Reload subtitles. With nothing saved yet it only drops the unsaved changes and changes no file.

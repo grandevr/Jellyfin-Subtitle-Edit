@@ -6,6 +6,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using SubtitleQuickEdit.Core.Srt;
 
 namespace SubtitleQuickEdit.Core.Storage;
 
@@ -17,11 +18,17 @@ namespace SubtitleQuickEdit.Core.Storage;
 /// very first save of a subtitle, and <c>…_save.srt</c> for the content from before each later save (only in
 /// <see cref="BackupMode.OriginalPlusLastN"/>). An original backup is never overwritten or removed.
 /// </para>
+/// <para>
+/// <c>…_restore.srt</c> files are restore points: the content at the start of an editing session, kept whatever the
+/// mode (the newest three per subtitle) so that the editor's "Revert to original" can go back to it.
+/// </para>
 /// </summary>
 public sealed partial class BackupStore
 {
     private const string OriginalKind = "original";
     private const string SaveKind = "save";
+    private const string RestorePointKind = "restore";
+    private const int RestorePointsKept = 3;
 
     private readonly string folder;
     private readonly BackupMode mode;
@@ -58,12 +65,7 @@ public sealed partial class BackupStore
     {
         ArgumentNullException.ThrowIfNull(subtitlePath);
         ArgumentNullException.ThrowIfNull(currentContent);
-        if (!SafeId().IsMatch(itemId))
-        {
-            throw new ArgumentException("The item id must be hexadecimal.", nameof(itemId));
-        }
-
-        string key = string.Create(CultureInfo.InvariantCulture, $"{itemId.ToLowerInvariant()}_{streamIndex}_{PathId(subtitlePath)}");
+        string key = Key(itemId, streamIndex, subtitlePath);
         try
         {
             Directory.CreateDirectory(folder);
@@ -75,30 +77,99 @@ public sealed partial class BackupStore
             else if (mode == BackupMode.OriginalPlusLastN)
             {
                 created.Add(WriteNew(key, SaveKind, currentContent));
-                Prune(key);
+                Prune(key, SaveKind, keepLastSaves);
             }
 
             return created;
         }
         catch (UnauthorizedAccessException ex)
         {
-            throw new SubtitleWriteException(
-                SubtitleWriteError.NotWritable,
-                "The backup folder '" + folder + "' is not writable by the Jellyfin process (running as '" + Environment.UserName
-                    + "'). Nothing was saved.",
-                innerException: ex);
+            throw NotWritable(ex);
         }
         catch (IOException ex)
         {
-            throw new SubtitleWriteException(
-                SubtitleWriteError.Io,
-                "Could not write a backup in '" + folder + "': " + ex.Message + " Nothing was saved.",
-                innerException: ex);
+            throw IoFailure(ex);
         }
+    }
+
+    /// <summary>
+    /// Keeps a restore point: the content of a subtitle at the start of an editing session, whatever the backup mode.
+    /// Only the newest three restore points of a subtitle are kept.
+    /// </summary>
+    /// <param name="itemId">The library item id (hex, as in Jellyfin's item ids).</param>
+    /// <param name="streamIndex">The subtitle stream index.</param>
+    /// <param name="subtitlePath">The subtitle file's path.</param>
+    /// <param name="content">The exact bytes to keep.</param>
+    /// <returns>The restore point file.</returns>
+    /// <exception cref="SubtitleWriteException">The restore point could not be written. The save must not go ahead.</exception>
+    public string KeepRestorePoint(string itemId, int streamIndex, string subtitlePath, byte[] content)
+    {
+        ArgumentNullException.ThrowIfNull(subtitlePath);
+        ArgumentNullException.ThrowIfNull(content);
+        string key = Key(itemId, streamIndex, subtitlePath);
+        try
+        {
+            Directory.CreateDirectory(folder);
+            string path = WriteNew(key, RestorePointKind, content);
+            Prune(key, RestorePointKind, RestorePointsKept);
+            return path;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw NotWritable(ex);
+        }
+        catch (IOException ex)
+        {
+            throw IoFailure(ex);
+        }
+    }
+
+    /// <summary>
+    /// Finds a kept version of a subtitle (an original, an earlier save or a restore point) by the SHA-256 of its
+    /// content, newest first.
+    /// </summary>
+    /// <param name="itemId">The library item id (hex, as in Jellyfin's item ids).</param>
+    /// <param name="streamIndex">The subtitle stream index.</param>
+    /// <param name="subtitlePath">The subtitle file's path.</param>
+    /// <param name="hash">SHA-256 (hex) of the wanted content.</param>
+    /// <returns>The content, or null when no kept version has that hash.</returns>
+    public byte[]? FindByHash(string itemId, int streamIndex, string subtitlePath, string hash)
+    {
+        ArgumentNullException.ThrowIfNull(subtitlePath);
+        ArgumentNullException.ThrowIfNull(hash);
+        string key = Key(itemId, streamIndex, subtitlePath);
+        if (!Directory.Exists(folder))
+        {
+            return null;
+        }
+
+        string wanted = hash.Trim().ToLowerInvariant();
+        IEnumerable<string> files = Directory.EnumerateFiles(folder, key + "_*.srt")
+            .OrderByDescending(f => Path.GetFileName(f), StringComparer.Ordinal);
+        foreach (string file in files)
+        {
+            byte[] content = File.ReadAllBytes(file);
+            if (string.Equals(SrtDocument.ComputeHash(content), wanted, StringComparison.Ordinal))
+            {
+                return content;
+            }
+        }
+
+        return null;
     }
 
     [GeneratedRegex("^[0-9a-fA-F-]{1,64}$", RegexOptions.CultureInvariant)]
     private static partial Regex SafeId();
+
+    private static string Key(string itemId, int streamIndex, string subtitlePath)
+    {
+        if (!SafeId().IsMatch(itemId))
+        {
+            throw new ArgumentException("The item id must be hexadecimal.", nameof(itemId));
+        }
+
+        return string.Create(CultureInfo.InvariantCulture, $"{itemId.ToLowerInvariant()}_{streamIndex}_{PathId(subtitlePath)}");
+    }
 
     private static string PathId(string path)
     {
@@ -128,14 +199,25 @@ public sealed partial class BackupStore
         }
     }
 
-    private void Prune(string key)
+    private void Prune(string key, string kind, int keep)
     {
-        List<string> saves = Directory.EnumerateFiles(folder, key + "_*_" + SaveKind + ".srt")
+        List<string> kept = Directory.EnumerateFiles(folder, key + "_*_" + kind + ".srt")
             .OrderByDescending(f => Path.GetFileName(f), StringComparer.Ordinal)
             .ToList();
-        foreach (string old in saves.Skip(keepLastSaves))
+        foreach (string old in kept.Skip(keep))
         {
             File.Delete(old);
         }
     }
+
+    private SubtitleWriteException NotWritable(UnauthorizedAccessException ex) => new(
+        SubtitleWriteError.NotWritable,
+        "The backup folder '" + folder + "' is not writable by the Jellyfin process (running as '" + Environment.UserName
+            + "'). Nothing was saved.",
+        innerException: ex);
+
+    private SubtitleWriteException IoFailure(IOException ex) => new(
+        SubtitleWriteError.Io,
+        "Could not write a backup in '" + folder + "': " + ex.Message + " Nothing was saved.",
+        innerException: ex);
 }

@@ -164,6 +164,14 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
     flex: 1;
 }
 
+.sqe-actions {
+    flex-wrap: wrap;
+}
+
+.sqe-revert {
+    margin-left: auto;
+}
+
 .sqe-button {
     padding: 8px 14px;
     border: 1px solid var(--sqe-line);
@@ -275,7 +283,8 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
     font-size: 0.9em;
 }
 
-.sqe-undo {
+.sqe-undo,
+.sqe-undo-saved {
     position: absolute;
     top: 8px;
     right: 8px;
@@ -352,7 +361,8 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
         min-width: 44px;
     }
 
-    .sqe-undo {
+    .sqe-undo,
+    .sqe-undo-saved {
         top: 4px;
         right: 4px;
     }

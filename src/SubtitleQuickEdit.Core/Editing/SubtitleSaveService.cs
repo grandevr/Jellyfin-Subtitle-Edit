@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using SubtitleQuickEdit.Core.Srt;
 using SubtitleQuickEdit.Core.Storage;
@@ -63,10 +64,82 @@ public sealed class SubtitleSaveService
         }
 
         SrtApplyResult applied = doc.Apply(request.Edits, request.RuntimeMs);
-        backups.BeforeSave(request.ItemId, request.StreamIndex, request.Path, doc.Data.ToArray());
+        byte[] current = doc.Data.ToArray();
+        backups.BeforeSave(request.ItemId, request.StreamIndex, request.Path, current);
+        if (request.KeepRestorePoint)
+        {
+            backups.KeepRestorePoint(request.ItemId, request.StreamIndex, request.Path, current);
+        }
+
         WriteOutcome outcome = writer.Write(request.Path, applied.Content, baseHash);
 
         List<int> saved = applied.EditedCuePositions.Concat(applied.AddedCuePositions.Values).Distinct().OrderBy(p => p).ToList();
         return new SaveResult(applied.Hash, saved, applied.AddedCuePositions, outcome.Method, outcome.Notes);
     }
+
+    /// <summary>
+    /// Puts a subtitle back to a version kept in the backups (its original, an earlier save or a restore point), found
+    /// by the hash of its content. The current content is backed up first, like before any save, and the kept version
+    /// is written back byte for byte.
+    /// </summary>
+    /// <param name="request">What to restore.</param>
+    /// <returns>The outcome.</returns>
+    /// <exception cref="RestorePointNotFoundException">No kept version has that content. Nothing was changed.</exception>
+    /// <exception cref="SubtitleWriteException">The file changed since it was loaded, or reading or writing failed.</exception>
+    public RestoreResult Restore(RestoreRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        string baseHash = request.BaseHash.Trim().ToLowerInvariant();
+        string targetHash = request.TargetHash.Trim().ToLowerInvariant();
+        byte[] current;
+        try
+        {
+            current = File.ReadAllBytes(request.Path);
+        }
+        catch (IOException ex)
+        {
+            throw ReadFailure("the subtitle file", ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw ReadFailure("the subtitle file", ex);
+        }
+
+        string currentHash = SrtDocument.ComputeHash(current);
+        if (!string.Equals(currentHash, baseHash, StringComparison.Ordinal))
+        {
+            throw new SubtitleWriteException(
+                SubtitleWriteError.Conflict,
+                "The subtitle file changed on disk since it was loaded.",
+                currentHash: currentHash);
+        }
+
+        if (string.Equals(currentHash, targetHash, StringComparison.Ordinal))
+        {
+            return new RestoreResult(currentHash, false, null, Array.Empty<string>());
+        }
+
+        byte[] content;
+        try
+        {
+            content = backups.FindByHash(request.ItemId, request.StreamIndex, request.Path, targetHash)
+                ?? throw new RestorePointNotFoundException(
+                    "That earlier version of the subtitle is not in the backups any more, so it cannot be restored.");
+        }
+        catch (IOException ex)
+        {
+            throw ReadFailure("the backups", ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw ReadFailure("the backups", ex);
+        }
+
+        backups.BeforeSave(request.ItemId, request.StreamIndex, request.Path, current);
+        WriteOutcome outcome = writer.Write(request.Path, content, baseHash);
+        return new RestoreResult(targetHash, true, outcome.Method, outcome.Notes);
+    }
+
+    private static SubtitleWriteException ReadFailure(string what, Exception ex) =>
+        new(SubtitleWriteError.Io, "Could not read " + what + ": " + ex.Message, innerException: ex);
 }

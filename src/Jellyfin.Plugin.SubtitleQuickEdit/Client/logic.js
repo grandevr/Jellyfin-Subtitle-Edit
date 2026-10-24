@@ -538,6 +538,26 @@
             return true;
         }
 
+        /**
+         * Stages the reverse of a saved edit: the line's text from before that save, to be written by the next Save.
+         * Refused when the line has changed in the file since. Returns stageEdit's answer, or { ok: false, error }.
+         */
+        undoSaved(rowId) {
+            const row = this.findRow(rowId);
+            if (!row || row.type !== 'edit' || row.status !== 'saved') {
+                return { ok: false, error: 'Only a saved change to a line can be undone this way.' };
+            }
+
+            const cue = this.cues.find(function (c) {
+                return c.index === row.cueIndex;
+            });
+            if (!cue || normalizeText(cue.text) !== row.newText) {
+                return { ok: false, error: 'This line was changed again after that save, so it cannot be put back this way. Edit it by hand.' };
+            }
+
+            return this.stageEdit(cue, row.oldText);
+        }
+
         /** Staged new lines that overlap the span, for the overlap warning (existing cues are checked with findOverlaps). */
         stagedOverlaps(startMs, endMs, exceptClientId) {
             return this.rows.filter(function (r) {
@@ -693,6 +713,13 @@
                 return r.status !== 'saved';
             });
             return before - this.rows.length;
+        }
+
+        /** Forgets every row, saved or not (after "Revert to original"). Returns how many. */
+        clear() {
+            const count = this.rows.length;
+            this.rows = [];
+            return count;
         }
 
         /** The rows worth keeping across a page reload: everything not saved, as plain data. */

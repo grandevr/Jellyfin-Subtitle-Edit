@@ -255,4 +255,99 @@ public class SubtitleSaveServiceTests
         Assert.Throws<ArgumentNullException>(() => new SubtitleSaveService(null!, new BackupStore("/x", BackupMode.OriginalOnly, 1)));
         Assert.Throws<ArgumentNullException>(() => new SubtitleSaveService(new SafeFileWriter(), null!));
     }
+
+    [Fact]
+    public void Restore_goes_back_byte_for_byte_to_the_restore_point_of_a_later_session_whatever_the_mode()
+    {
+        using var dir = new TempDir();
+        byte[] original = Original();
+        string path = Subtitle(dir, original);
+        SubtitleSaveService service = Service(dir);
+        SrtDocument doc = SrtDocument.Parse(original).Document!;
+
+        // An earlier session: the original is backed up.
+        SaveResult earlier = service.Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "Wcześniej")));
+        byte[] sessionStart = File.ReadAllBytes(path);
+
+        // This session: the first save keeps a restore point, then a text edit and an added line.
+        SaveResult first = service.Save(
+            new SaveRequest(Item, 4, path, earlier.Hash, new SrtEdit[] { new SrtTextEdit(2, doc.Cues[1].Text, "Teraz") }, 600_000, KeepRestorePoint: true));
+        SaveResult second = service.Save(
+            new SaveRequest(Item, 4, path, first.Hash, new SrtEdit[] { new SrtAddCue("n1", 50, 500, "Nowa linia") }, 600_000));
+
+        RestoreResult restored = service.Restore(new RestoreRequest(Item, 4, path, second.Hash, Content.Hash(sessionStart)));
+
+        Assert.True(restored.Restored);
+        Assert.Equal(Content.Hash(sessionStart), restored.Hash);
+        Assert.Equal(sessionStart, File.ReadAllBytes(path));
+        Assert.Single(Directory.GetFiles(BackupFolder(dir)), f => f.EndsWith("_restore.srt", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Restore_can_go_back_to_the_original_backup()
+    {
+        using var dir = new TempDir();
+        byte[] original = Original();
+        string path = Subtitle(dir, original);
+        SrtDocument doc = SrtDocument.Parse(original).Document!;
+        SaveResult saved = Service(dir).Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "x")));
+
+        RestoreResult restored = Service(dir).Restore(new RestoreRequest(Item, 4, path, saved.Hash, Content.Hash(original)));
+
+        Assert.True(restored.Restored);
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void Restore_with_a_stale_base_hash_is_a_conflict_and_changes_nothing()
+    {
+        using var dir = new TempDir();
+        byte[] original = Original();
+        string path = Subtitle(dir, original);
+        SrtDocument doc = SrtDocument.Parse(original).Document!;
+        SaveResult saved = Service(dir).Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "x")));
+        byte[] now = File.ReadAllBytes(path);
+
+        SubtitleWriteException ex = Assert.Throws<SubtitleWriteException>(
+            () => Service(dir).Restore(new RestoreRequest(Item, 4, path, Content.Hash(original), Content.Hash(original))));
+
+        Assert.Equal(SubtitleWriteError.Conflict, ex.Error);
+        Assert.Equal(saved.Hash, ex.CurrentHash);
+        Assert.Equal(now, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void Restore_to_a_version_that_was_never_kept_is_refused_and_changes_nothing()
+    {
+        using var dir = new TempDir();
+        byte[] original = Original();
+        string path = Subtitle(dir, original);
+        SrtDocument doc = SrtDocument.Parse(original).Document!;
+        SaveResult saved = Service(dir).Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "x")));
+        byte[] now = File.ReadAllBytes(path);
+        int backups = BackupCount(dir);
+
+        Assert.Throws<RestorePointNotFoundException>(
+            () => Service(dir).Restore(new RestoreRequest(Item, 4, path, saved.Hash, Content.Hash(Content.Srt("never")))));
+
+        Assert.Equal(now, File.ReadAllBytes(path));
+        Assert.Equal(backups, BackupCount(dir));
+    }
+
+    [Fact]
+    public void Restore_to_the_content_the_file_already_has_writes_nothing()
+    {
+        using var dir = new TempDir();
+        byte[] original = Original();
+        string path = Subtitle(dir, original);
+        DateTime before = File.GetLastWriteTimeUtc(path);
+
+        RestoreResult result = Service(dir).Restore(new RestoreRequest(Item, 4, path, Content.Hash(original), Content.Hash(original)));
+
+        Assert.False(result.Restored);
+        Assert.Null(result.Method);
+        Assert.Equal(Content.Hash(original), result.Hash);
+        Assert.Equal(before, File.GetLastWriteTimeUtc(path));
+        Assert.Equal(0, BackupCount(dir));
+    }
 }

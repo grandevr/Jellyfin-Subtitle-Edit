@@ -82,8 +82,15 @@ Every error answer has the shape `{ "code", "message", "cueIndex"?, "currentHash
 | `GET Items/{itemId}/Subtitles` | admins; other users only when submissions are on and the item is visible to them (library access included) | the item's subtitle streams: `streamIndex`, `language`, `title`, `external`, `format`, `editable`, `reason` |
 | `GET Items/{itemId}/Subtitles/{streamIndex}/Cues` | same | `hash` (SHA-256 of the file), `encoding`, and the cues (`index` = 1-based position, `start`, `end` in ms, `text` with `\n`) |
 | `POST Items/{itemId}/Subtitles/{streamIndex}/Edits` | admins only (403 for everyone else) | `hash`, `savedCueIndexes`, `addedCues` (client id to position), `writeMethod` |
+| `POST Items/{itemId}/Subtitles/{streamIndex}/Restore` | admins only | `hash`, `restored` (false when the file already had that content), `writeMethod` |
 
-Edits body: `{ "baseHash", "edits": [ {"type":"edit","cueIndex","oldText","newText"} | {"type":"add","clientId","startMs","endMs","text"} ] }`.
+Edits body: `{ "baseHash", "edits": [ {"type":"edit","cueIndex","oldText","newText"} | {"type":"add","clientId","startMs","endMs","text"} ], "keepRestorePoint"? }`.
+With `keepRestorePoint` (the editor sends it on the first save of a browser session) the file as it was is also kept
+as a restore point (`…_restore.srt`, the newest 3 per file).
+
+Restore body: `{ "baseHash", "targetHash" }`. Writes back, byte for byte, the kept backup (original, save or restore
+point) whose SHA-256 is `targetHash`, after backing up the current file. 404 `RestorePointNotFound` when none matches,
+409 `FileChanged` when the file's hash is not `baseHash`. The panel's "Revert to original" button uses it.
 
 Status codes: 400 `InvalidRequest` / `InvalidEdit` / `CueNotFound` / `NotEditable` (embedded, not .srt, not local); 403
 `Forbidden`; 404 `ItemNotFound` / `StreamNotFound` (a non-admin cannot probe for items: without access, or with

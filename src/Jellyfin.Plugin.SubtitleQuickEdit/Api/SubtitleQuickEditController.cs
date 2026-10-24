@@ -205,7 +205,7 @@ public class SubtitleQuickEditController : ControllerBase
             return Error(resolution.Status, resolution.Code!, resolution.Message!);
         }
 
-        (EditsRequest? request, ObjectResult? unreadable) = await ReadRequestAsync(cancellationToken).ConfigureAwait(false);
+        (EditsRequest? request, ObjectResult? unreadable) = await ReadRequestAsync<EditsRequest>(cancellationToken).ConfigureAwait(false);
         if (request is null)
         {
             return unreadable!;
@@ -230,7 +230,8 @@ public class SubtitleQuickEditController : ControllerBase
         try
         {
             SaveResult result = service.Save(
-                new SaveRequest(item.Id.ToString("N", CultureInfo.InvariantCulture), streamIndex, resolution.Path, request.BaseHash, edits, runtimeMs));
+                new SaveRequest(
+                    item.Id.ToString("N", CultureInfo.InvariantCulture), streamIndex, resolution.Path, request.BaseHash, edits, runtimeMs, request.KeepRestorePoint));
 
             logger.LogInformation(
                 "{User} saved {Count} edit(s) to subtitle stream {StreamIndex} of item {ItemId} ({Method}).",
@@ -266,7 +267,103 @@ public class SubtitleQuickEditController : ControllerBase
         }
     }
 
-    private async Task<(EditsRequest? Request, ObjectResult? Problem)> ReadRequestAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Puts a subtitle back to an earlier version kept in the plugin's backups (the original, an earlier save, or the
+    /// restore point kept at the first save of an editing session), chosen by the hash of its content. Admins only.
+    /// </summary>
+    /// <param name="itemId">The item id.</param>
+    /// <param name="streamIndex">The subtitle stream index.</param>
+    /// <param name="cancellationToken">Cancels reading the request body.</param>
+    /// <response code="200">Restored, or the file already had that content.</response>
+    /// <response code="400">The request is invalid.</response>
+    /// <response code="403">Not an administrator.</response>
+    /// <response code="404">No such item, stream or kept version.</response>
+    /// <response code="409">The file changed since it was loaded.</response>
+    /// <response code="500">The file could not be written (the body says why).</response>
+    /// <returns>The new hash.</returns>
+    [HttpPost("Items/{itemId}/Subtitles/{streamIndex}/Restore")]
+    [Authorize(Policy = ElevationPolicy)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<RestoreResponse>> PostRestore(
+        [FromRoute] Guid itemId,
+        [FromRoute] int streamIndex,
+        CancellationToken cancellationToken)
+    {
+        if (Request.ContentLength > MaxRequestBytes)
+        {
+            return Error(StatusCodes.Status413PayloadTooLarge, "RequestTooLarge", "The request is larger than 1 MB.");
+        }
+
+        BaseItem? item = resolver.FindVideo(itemId);
+        if (item is null)
+        {
+            return Error(StatusCodes.Status404NotFound, "ItemNotFound", "No such item.");
+        }
+
+        TrackResolution resolution = resolver.Resolve(item, streamIndex);
+        if (resolution.Path is null)
+        {
+            return Error(resolution.Status, resolution.Code!, resolution.Message!);
+        }
+
+        (RestoreBody? body, ObjectResult? unreadable) = await ReadRequestAsync<RestoreBody>(cancellationToken).ConfigureAwait(false);
+        if (body is null)
+        {
+            return unreadable!;
+        }
+
+        if (!IsHash(body.BaseHash) || !IsHash(body.TargetHash))
+        {
+            return Error(StatusCodes.Status400BadRequest, "InvalidRequest", "The request needs baseHash and targetHash (SHA-256, hex).");
+        }
+
+        PluginConfiguration config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        string backupFolder = Plugin.Instance?.BackupFolder ?? Path.Combine(Path.GetTempPath(), "SubtitleQuickEdit", "backups");
+        var service = new SubtitleSaveService(new SafeFileWriter(), new BackupStore(backupFolder, config.BackupMode, config.BackupKeepLastSaves));
+
+        try
+        {
+            RestoreResult result = service.Restore(
+                new RestoreRequest(item.Id.ToString("N", CultureInfo.InvariantCulture), streamIndex, resolution.Path, body.BaseHash!, body.TargetHash!));
+            if (result.Restored)
+            {
+                logger.LogInformation(
+                    "{User} restored subtitle stream {StreamIndex} of item {ItemId} to an earlier version ({Method}).",
+                    User.Identity?.Name,
+                    streamIndex,
+                    item.Id,
+                    result.Method);
+            }
+
+            foreach (string note in result.Notes)
+            {
+                logger.LogWarning("Subtitle Quick Edit: {Note}", note);
+            }
+
+            return new RestoreResponse { Hash = result.Hash, Restored = result.Restored, WriteMethod = result.Method?.ToString() };
+        }
+        catch (RestorePointNotFoundException ex)
+        {
+            return Error(StatusCodes.Status404NotFound, "RestorePointNotFound", ex.Message);
+        }
+        catch (SubtitleWriteException ex)
+        {
+            return WriteError(ex, item.Id, streamIndex);
+        }
+    }
+
+    private static bool IsHash(string? value)
+    {
+        string trimmed = value?.Trim() ?? string.Empty;
+        return trimmed.Length == 64 && trimmed.All(Uri.IsHexDigit);
+    }
+
+    private async Task<(T? Request, ObjectResult? Problem)> ReadRequestAsync<T>(CancellationToken cancellationToken)
+        where T : class
     {
         // Read at most the limit plus one byte, so a chunked body without a Content-Length is caught too.
         using var buffer = new MemoryStream();
@@ -283,7 +380,7 @@ public class SubtitleQuickEditController : ControllerBase
 
         try
         {
-            EditsRequest? request = JsonSerializer.Deserialize<EditsRequest>(buffer.ToArray(), JsonOptions);
+            T? request = JsonSerializer.Deserialize<T>(buffer.ToArray(), JsonOptions);
             return request is null
                 ? (null, Error(StatusCodes.Status400BadRequest, "InvalidRequest", "The request body is empty."))
                 : (request, null);
