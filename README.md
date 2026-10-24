@@ -24,7 +24,7 @@ settings from the environment (see `devtools/env.sh`; there are no defaults, a m
 
 | Variable | Meaning | Example |
 |---|---|---|
-| `SQE_HOST_EXEC` | Command prefix that runs a command on the test host (stdin is passed through) | `ssh myhost` or `ssh myhost pct exec 103 --` |
+| `SQE_HOST_EXEC` | Command prefix that runs a command string on the test host; it gets the whole quoted command as one last argument (stdin is passed through) | `ssh myhost`, `ssh myhost pct exec 103 --`, or `sh -c` for a local test server |
 | `SQE_TEST_ROOT` | Test server folder on that host, holding `config/`, `media/` and `src/` | `/srv/jellyfin-test` |
 | `JF_BASE` | Test server URL, used by `testdata/*.py` | `http://test-host:8097` |
 | `SQE_CONTAINER` | Optional: test server container name (default `jellyfin-test`) | |
