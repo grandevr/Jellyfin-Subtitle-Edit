@@ -27,6 +27,10 @@
   <ItemGroup>
     <None Remove="Configuration\configPage.html" />
     <EmbeddedResource Include="Configuration\configPage.html" />
+    <None Remove="Client\quickedit.js" />
+    <EmbeddedResource Include="Client\quickedit.js" LogicalName="Client.quickedit.js" />
+    <None Remove="Client\quickedit.css" />
+    <EmbeddedResource Include="Client\quickedit.css" LogicalName="Client.quickedit.css" />
   </ItemGroup>
 
 </Project>

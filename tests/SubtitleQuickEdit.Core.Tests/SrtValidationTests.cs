@@ -33,6 +33,26 @@ public class SrtValidationTests
         Assert.Equal(SrtEditError.InvalidEdit, edit.Error);
         Assert.Equal(1, edit.CuePosition);
         Assert.Equal(SrtEditError.InvalidEdit, add.Error);
+        Assert.Null(edit.ClientId);
+        Assert.Equal("x", add.ClientId);
+    }
+
+    [Fact]
+    public void An_invalid_added_line_names_its_client_id_and_other_errors_do_not()
+    {
+        SrtDocument doc = Doc();
+
+        SrtEditException late = Assert.Throws<SrtEditException>(
+            () => doc.Apply(new SrtEdit[] { new SrtAddCue("fine", 100, 900, "ok"), new SrtAddCue("late", 500, 520, "too short") }));
+        SrtEditException twin = Assert.Throws<SrtEditException>(
+            () => doc.Apply(new SrtEdit[] { new SrtAddCue("same", 100, 900, "a"), new SrtAddCue("same", 1000, 2000, "b") }));
+        SrtEditException mismatch = Assert.Throws<SrtEditException>(
+            () => doc.Apply(new SrtEdit[] { new SrtTextEdit(1, "not the text", "x") }));
+
+        Assert.Equal("late", late.ClientId);
+        Assert.Equal("same", twin.ClientId);
+        Assert.Equal(SrtEditError.TextMismatch, mismatch.Error);
+        Assert.Null(mismatch.ClientId);
     }
 
     [Theory]

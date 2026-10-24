@@ -15,5 +15,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<SubtitleTrackResolver>();
         serviceCollection.AddHostedService<StartupService>();
+        serviceCollection.AddHostedService<FileTransformationRegistrar>();
     }
 }

@@ -284,12 +284,28 @@ refusal("empty new text -> 400 InvalidEdit",
         {"baseHash": H, "edits": [{"type": "edit", "cueIndex": 2, "oldText": polish_texts[1], "newText": ""}]}, 400, "InvalidEdit")
 refusal("a cue that does not exist -> 400 CueNotFound",
         {"baseHash": H, "edits": [{"type": "edit", "cueIndex": 99, "oldText": "x", "newText": "y"}]}, 400, "CueNotFound", {"cueIndex": 99})
-refusal("an added line that ends before it starts -> 400 InvalidEdit",
-        {"baseHash": H, "edits": [{"type": "add", "clientId": "a", "startMs": 5000, "endMs": 4000, "text": "x"}]}, 400, "InvalidEdit")
-refusal("an added line shorter than 100 ms -> 400 InvalidEdit",
-        {"baseHash": H, "edits": [{"type": "add", "clientId": "a", "startMs": 5000, "endMs": 5050, "text": "x"}]}, 400, "InvalidEdit")
-refusal("an added line past the video's runtime (60 s) -> 400 InvalidEdit",
-        {"baseHash": H, "edits": [{"type": "add", "clientId": "a", "startMs": 59000, "endMs": 61000, "text": "x"}]}, 400, "InvalidEdit")
+refusal("an added line that ends before it starts -> 400 InvalidEdit naming its clientId",
+        {"baseHash": H, "edits": [{"type": "add", "clientId": "a", "startMs": 5000, "endMs": 4000, "text": "x"}]}, 400, "InvalidEdit", {"clientId": "a"})
+refusal("an added line shorter than 100 ms -> 400 InvalidEdit naming its clientId",
+        {"baseHash": H, "edits": [{"type": "add", "clientId": "a", "startMs": 5000, "endMs": 5050, "text": "x"}]}, 400, "InvalidEdit", {"clientId": "a"})
+refusal("an added line past the video's runtime (60 s) -> 400 InvalidEdit naming its clientId",
+        {"baseHash": H, "edits": [{"type": "add", "clientId": "a", "startMs": 59000, "endMs": 61000, "text": "x"}]}, 400, "InvalidEdit", {"clientId": "a"})
+refusal("an added line with a blank line in its text -> 400 InvalidEdit naming its clientId",
+        {"baseHash": H, "edits": [{"type": "add", "clientId": "blank", "startMs": 5000, "endMs": 6000, "text": "a\n\nb"}]}, 400, "InvalidEdit", {"clientId": "blank"})
+refusal("the second of two bad added lines is the one named (the first is fine)",
+        {"baseHash": H, "edits": [{"type": "add", "clientId": "ok1", "startMs": 5000, "endMs": 6000, "text": "fine"},
+                                  {"type": "add", "clientId": "bad2", "startMs": 7000, "endMs": 7010, "text": "short"}]}, 400, "InvalidEdit", {"clientId": "bad2"})
+refusal("two added lines sharing a clientId -> 400 InvalidEdit naming it",
+        {"baseHash": H, "edits": [{"type": "add", "clientId": "dup", "startMs": 5000, "endMs": 6000, "text": "one"},
+                                  {"type": "add", "clientId": "dup", "startMs": 7000, "endMs": 8000, "text": "two"}]}, 400, "InvalidEdit", {"clientId": "dup"})
+refusal("an added line with missing fields -> 400 InvalidEdit naming its clientId",
+        {"baseHash": H, "edits": [{"type": "add", "clientId": "half", "startMs": 5000}]}, 400, "InvalidEdit", {"clientId": "half"})
+refusal("an added line without a clientId -> 400 InvalidEdit, clientId null",
+        {"baseHash": H, "edits": [{"type": "add", "startMs": 5000, "endMs": 6000, "text": "x"}]}, 400, "InvalidEdit", {"clientId": None})
+refusal("an invalid edit of an existing cue -> 400 InvalidEdit, clientId null",
+        {"baseHash": H, "edits": [{"type": "edit", "cueIndex": 2, "oldText": polish_texts[1], "newText": "a\n\nb"}]}, 400, "InvalidEdit", {"clientId": None})
+refusal("a stale base hash -> 409 FileChanged, clientId null",
+        {"baseHash": "0" * 64, "edits": [{"type": "add", "clientId": "late", "startMs": 5000, "endMs": 6000, "text": "x"}]}, 409, "FileChanged", {"clientId": None})
 refusal("an unknown edit type -> 400 InvalidEdit", {"baseHash": H, "edits": [{"type": "delete", "cueIndex": 1}]}, 400, "InvalidEdit")
 refusal("an edit with missing fields -> 400 InvalidEdit", {"baseHash": H, "edits": [{"type": "edit", "cueIndex": 1}]}, 400, "InvalidEdit")
 refusal("no edits -> 400 InvalidEdit", {"baseHash": H, "edits": []}, 400, "InvalidEdit")

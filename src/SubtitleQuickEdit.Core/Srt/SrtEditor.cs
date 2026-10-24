@@ -33,8 +33,17 @@ internal static class SrtEditor
                     ValidateTextEdit(doc, te, textEdits);
                     break;
                 case SrtAddCue add:
-                    ValidateAdd(add, runtimeMs, clientIds);
-                    adds.Add((add, NormalizeAndValidateText(add.Text, null), adds.Count));
+                    try
+                    {
+                        ValidateAdd(add, runtimeMs, clientIds);
+                        adds.Add((add, NormalizeAndValidateText(add.Text, null), adds.Count));
+                    }
+                    catch (SrtEditException ex) when (ex.Error == SrtEditError.InvalidEdit && ex.ClientId is null && !string.IsNullOrEmpty(add.ClientId))
+                    {
+                        // Name the added line, so the client can mark the right row.
+                        throw new SrtEditException(ex.Error, ex.Message, ex.CuePosition) { ClientId = add.ClientId };
+                    }
+
                     break;
                 default:
                     throw new SrtEditException(SrtEditError.InvalidEdit, "Unknown edit type.");
