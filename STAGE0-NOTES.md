@@ -1,6 +1,6 @@
 # Stage 0 findings (2026-10-16)
 
-Test server: container `jellyfin-test` on CT 103, `/opt/jellyfin-test`, http://192.168.0.21:8097,
+Test server: container `jellyfin-test` on the test host, `$SQE_TEST_ROOT`, $JF_BASE,
 image pinned to the live digest sha256:799509f8... (Jellyfin 12.2.0, linuxserver 12.2ubu2604-ls54).
 
 ## Build
@@ -12,7 +12,7 @@ image pinned to the live digest sha256:799509f8... (Jellyfin 12.2.0, linuxserver
 - The built template DLL loads on 12.2 ("Loaded plugin: Template 0.0.0.0").
 - Build command (as uid 1000, nuget cache inside the source folder):
   docker run --rm --user 1000:1000 -e HOME=/tmp -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1
-  -e NUGET_PACKAGES=/src/.nuget -v /opt/jellyfin-test/src/<proj>:/src -w /src
+  -e NUGET_PACKAGES=/src/.nuget -v $SQE_TEST_ROOT/src/<proj>:/src -w /src
   mcr.microsoft.com/dotnet/sdk:10.0 dotnet build -c Release
 
 ## File Transformation

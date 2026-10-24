@@ -5,7 +5,7 @@ Mutants are built with analyzers off (the strict analyzers reject deliberately b
 copy is built the same way first and must pass.
 
 Each mutant is a scratch copy of the project (never the real source), synced to
-/opt/jellyfin-test/src/sqe-mut on CT 103 and tested in the SDK container. A mutant is "killed" when
+$SQE_TEST_ROOT/src/sqe-mut on the test host and tested in the SDK container. A mutant is "killed" when
 `dotnet test` fails. Usage: python3 -I devtools/mutation_check.py
 """
 import os
@@ -17,6 +17,7 @@ import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+TEST_ROOT = os.environ.get("SQE_TEST_ROOT") or sys.exit("set SQE_TEST_ROOT, see devtools/env.sh")
 KEEP = ["src", "tests", "Directory.Build.props", ".editorconfig", "SubtitleQuickEdit.slnx"]
 
 MUTANTS = [
@@ -84,7 +85,7 @@ def test_tree(work, flags, label):
     """Sync a tree to the mutant folder, force a rebuild, and run the tests.
 
     Returns ("build-failed" | "tests-failed" | "passed", failing test count, raw output)."""
-    env = dict(os.environ, SQE_SRC=str(work), SQE_DIR="/opt/jellyfin-test/src/sqe-mut", DOCKER_FLAGS=flags)
+    env = dict(os.environ, SQE_SRC=str(work), SQE_DIR=TEST_ROOT + "/src/sqe-mut", DOCKER_FLAGS=flags)
     reset = run([str(ROOT / "testdata/reset_fixtures.sh")], env)
     if reset.returncode != 0:
         print("reset_fixtures failed:", reset.stderr[-300:])
@@ -122,7 +123,7 @@ def copy_tree(tmp):
 
 
 def main():
-    flags = ("-v /opt/jellyfin-test/src/mismatch:/mismatch -v /opt/jellyfin-test/media:/fixtures:ro "
+    flags = ("-v " + TEST_ROOT + "/src/mismatch:/mismatch -v " + TEST_ROOT + "/media:/fixtures:ro "
              "-e SQE_MISMATCH_FILE=/mismatch/file.srt -e SQE_FIXTURE_DIR=/fixtures -e SQE_REQUIRE_INTEGRATION=1")
 
     with tempfile.TemporaryDirectory() as tmp:

@@ -19,13 +19,26 @@ API, settings page and backups. The client script (button, panel) is stage 3; su
 
 ## Building, testing, installing on the test server
 
-- Unit tests: `devtools/sync.sh && devtools/dotnet.sh test -c Release` (needs the test host, CT 103). Some tests need
+The scripts in `devtools/` and `testdata/` drive a throwaway Jellyfin test server and nothing else. They read their
+settings from the environment (see `devtools/env.sh`; there are no defaults, a missing variable stops the script):
+
+| Variable | Meaning | Example |
+|---|---|---|
+| `SQE_HOST_EXEC` | Command prefix that runs a command on the test host (stdin is passed through) | `ssh myhost` or `ssh myhost pct exec 103 --` |
+| `SQE_TEST_ROOT` | Test server folder on that host, holding `config/`, `media/` and `src/` | `/srv/jellyfin-test` |
+| `JF_BASE` | Test server URL, used by `testdata/*.py` | `http://test-host:8097` |
+| `SQE_CONTAINER` | Optional: test server container name (default `jellyfin-test`) | |
+| `SQE_DIR` | Optional: synced project folder on the host (default `$SQE_TEST_ROOT/src/sqe`) | |
+
+`<secrets-dir>` in the docs is any mode-700 folder for the test server's admin password and tokens; it is never committed.
+
+- Unit tests: `devtools/sync.sh && devtools/dotnet.sh test -c Release` (needs the test host, see below). Some tests need
   the test server's files, a file in a foreign group and a non-root user; set `SQE_REQUIRE_INTEGRATION=1` (with
   `SQE_FIXTURE_DIR` and `SQE_MISMATCH_FILE`) so that skipping them is a failure. Re-arm the foreign-group file with
   `devtools/prepare_mismatch.sh` first: a write that renames a new file over it resets its group, which is exactly what
   the test is there to catch.
 - Install on the test server only: build the plugin straight into its plugin folder
-  (`DOCKER_FLAGS="-v /opt/jellyfin-test/config/data/plugins:/plugins" devtools/dotnet.sh build
+  (`DOCKER_FLAGS="-v $SQE_TEST_ROOT/config/data/plugins:/plugins" devtools/dotnet.sh build
   src/Jellyfin.Plugin.SubtitleQuickEdit -c Release -o /plugins/SubtitleQuickEdit_0.2.0.0`) and restart the container.
   Jellyfin writes its own `meta.json`. `UtfUnknown.dll` is not shipped: the plugin uses the copy Jellyfin already has.
 - API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>` resets the fixtures and runs 75 checks against the
