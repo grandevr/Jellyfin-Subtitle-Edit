@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Stage 2 integration tests: the plugin's server API against the THROWAWAY test Jellyfin on CT 103.
+"""Stage 2 integration tests: the plugin's server API against the THROWAWAY test Jellyfin.
+Needs JF_BASE, SQE_HOST_EXEC and SQE_TEST_ROOT (see devtools/env.sh).
 
 Usage: python3 -I testdata/stage2_api_tests.py <secrets-dir>
 Needs admin.pw/token, testuser.token and limiteduser.token in <secrets-dir> (bootstrap_test_server.py and
@@ -18,10 +19,13 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = "http://192.168.0.21:8097"
+BASE = os.environ["JF_BASE"].rstrip("/")
+HOST_EXEC = shlex.split(os.environ["SQE_HOST_EXEC"])
+TEST_ROOT = os.environ["SQE_TEST_ROOT"]
+CONTAINER = os.environ.get("SQE_CONTAINER", "jellyfin-test")
 PLUGIN_ID = "b3b6f2a4-6f0e-4d5c-9a0c-5e2f6c1d7a31"
-HOST_MEDIA = "/opt/jellyfin-test/media/TestShow/Season 01"
-HOST_BACKUPS = "/opt/jellyfin-test/config/data/SubtitleQuickEdit/backups"
+HOST_MEDIA = TEST_ROOT + "/media/TestShow/Season 01"
+HOST_BACKUPS = TEST_ROOT + "/config/data/SubtitleQuickEdit/backups"
 HERE = os.path.dirname(os.path.abspath(__file__))
 SECRETS = sys.argv[1]
 
@@ -56,8 +60,7 @@ def call(method, path, body=None, tok=ADMIN, raw=None, ctype="application/json")
 
 
 def host(*args):
-    cmd = "pct exec 103 -- " + " ".join(shlex.quote(a) for a in args)
-    out = subprocess.run(["ssh", "pve", cmd], capture_output=True, check=False)
+    out = subprocess.run(HOST_EXEC + list(args), capture_output=True, check=False)
     if out.returncode != 0:
         raise RuntimeError("host command failed: %s %s" % (args, out.stderr.decode()[:200]))
     return out.stdout
@@ -116,7 +119,7 @@ def set_submissions(enabled):
 
 
 def plugin_log():
-    out = subprocess.run(["/usr/local/bin/pve-check", "docker-logs", "103", "jellyfin-test", "2000"], capture_output=True, text=True).stdout
+    out = subprocess.run(HOST_EXEC + ["docker", "logs", "--tail", "2000", CONTAINER], capture_output=True, text=True).stdout
     return out.splitlines()
 
 

@@ -2,7 +2,7 @@
 
 Spec: the "Jellyfin Subtitle Quick-Edit Plugin — Spec" doc (claude.ai artifact YP25tXFeL6JFKs3i32VdNx). Read it again
 before resuming: it is the source of truth and was updated after every stage. Nothing has been installed on the live
-Jellyfin or touched on the live Bazarr. All work is on a throwaway Jellyfin on CT 103.
+Jellyfin or touched on the live Bazarr. All work is on a throwaway Jellyfin on the test host.
 
 ## State at the pause
 
@@ -33,7 +33,7 @@ Jellyfin or touched on the live Bazarr. All work is on a throwaway Jellyfin on C
 - fsync of the temp file, of the folder after each rename/copy/cleanup, and of the `.inplace` marker rename; a failed folder
   fsync is a note, not a failed save.
 - `PlatformServices.Select(isLinux)`: off Linux no native code is created, plain rename path, startup notice logged once.
-- Project moved to `/home/claude/homelab/subtitle-quick-edit`.
+- Project moved to its own folder.
 
 **Stage 2: plugin skeleton and server API** (`src/Jellyfin.Plugin.SubtitleQuickEdit`, `Core/Editing`)
 - Plugin "Subtitle Quick Edit" 0.2.0.0 (id `b3b6f2a4-6f0e-4d5c-9a0c-5e2f6c1d7a31`), settings page, startup log.
@@ -82,18 +82,18 @@ Test on the test server only; deploy to live only after the whole acceptance che
    manager. Options: re-create the users and tokens on resume (a few commands, below), or keep a mode-600 secrets folder in
    the project for the test server only. Your call.
 2. **Automated browser tests.** Stage 3 needs a headless browser against the test server. The plan was a Playwright container
-   on CT 103 (an image of roughly 1 to 2 GB; CT 103 has about 16 GB free). Approve that, or choose manual-only testing.
+   on the test host (an image of roughly 1 to 2 GB; the test host had about 16 GB free). Approve that, or choose manual-only testing.
 3. **Teardown** (below) happens only when the project is finished; confirm the list then.
 4. **Not decided yet, needed at deployment:** installing File Transformation on the live Jellyfin is a deployment step, and
    restarting the live Jellyfin interrupts playback (done only with approval).
 
-## Test server (CT 103, throwaway, STOPPED at the pause, nothing removed)
+## Test server (the test host, throwaway, STOPPED at the pause, nothing removed)
 
 - Container `jellyfin-test` (`--restart no`), LAN-only port 8097, image pinned by digest to the live image
   (`lscr.io/linuxserver/jellyfin@sha256:799509f8ef3be7037478699cc6fd14d19dd75faac5e474ed219e98ae78a5b3e4`, 12.2.0). UPnP is off.
   Also pulled: `mcr.microsoft.com/dotnet/sdk:10.0`.
-- Folders: `/opt/jellyfin-test/config` (Jellyfin config and plugins), `/opt/jellyfin-test/media` (test videos and subtitles),
-  `/opt/jellyfin-test/src` (`sqe`: synced copy of the source; `.nuget`: package cache; `template-bump`: the stage 0 template
+- Folders: `$SQE_TEST_ROOT/config` (Jellyfin config and plugins), `$SQE_TEST_ROOT/media` (test videos and subtitles),
+  `$SQE_TEST_ROOT/src` (`sqe`: synced copy of the source; `.nuget`: package cache; `template-bump`: the stage 0 template
   build check; `mismatch`: the gid-2000 fixture file, kept for now, goes in the final teardown).
 - Library `TestTV` with three episodes. Episodes 1 and 2: five external `.srt` each in the encodings and line endings from the
   spec (group 1000, so saves take the in-place path). Episode 3: an embedded subtitle plus `.en.srt`, `.ja.ass`, `.de.vtt` and
@@ -101,30 +101,30 @@ Test on the test server only; deploy to live only after the whole acceptance che
 - Plugins installed there: File Transformation 3.0.2.0, Subtitle Quick Edit 0.2.0.0.
 - Users: `testadmin` (administrator), `testuser` (regular), `limiteduser` (no library access). Plugin setting "Allow user
   submissions" is Off.
-- Passwords and tokens: `/tmp/claude-1000/-home-claude-homelab/ef32264d-b9eb-4152-a39e-4a0a297c4684/scratchpad/secrets/`
+- Passwords and tokens: `<secrets-dir>/`
   (`admin.pw`, `token`, `testuser.pw`, `testuser.token`, `limiteduser.pw`, `limiteduser.token`; mode 600). The admin
   password was shown to the user in the stage 0 report; the other two were never printed. If that folder is gone: log in as
   `testadmin` with that password to get a token, delete `testuser` and `limiteduser`, and re-run
   `testdata/create_test_users.py` (it skips users that already exist).
 - Reset fixtures any time: `testdata/reset_fixtures.sh`.
 
-## Commands to resume (each is one line; run from `/home/claude/homelab/subtitle-quick-edit`)
+## Commands to resume (each is one line; run from the project folder)
 
-- Start the test server: `ssh pve pct exec 103 -- docker start jellyfin-test`
-- Wait until it answers: `until curl -s -m 3 http://192.168.0.21:8097/System/Info/Public | grep -qi '"version"'; do sleep 2; done`
-- Sync the source to CT 103: `devtools/sync.sh`
+- Start the test server: `$SQE_HOST_EXEC docker start jellyfin-test`
+- Wait until it answers: `until curl -s -m 3 $JF_BASE/System/Info/Public | grep -qi '"version"'; do sleep 2; done`
+- Sync the source to the test host: `devtools/sync.sh`
 - Clean rebuild: `devtools/dotnet.sh build -c Release --no-incremental`
 - Re-arm the foreign-group fixture: `devtools/prepare_mismatch.sh`
-- Unit tests (all integration tests required): `DOCKER_FLAGS="-v /opt/jellyfin-test/src/mismatch:/mismatch -v /opt/jellyfin-test/media:/fixtures:ro -e SQE_MISMATCH_FILE=/mismatch/file.srt -e SQE_FIXTURE_DIR=/fixtures -e SQE_REQUIRE_INTEGRATION=1" devtools/dotnet.sh test -c Release --no-build`
-- Install the plugin on the TEST server: `DOCKER_FLAGS="-v /opt/jellyfin-test/config/data/plugins:/plugins" devtools/dotnet.sh build src/Jellyfin.Plugin.SubtitleQuickEdit -c Release --no-incremental -o /plugins/SubtitleQuickEdit_0.2.0.0`
-- Restart the test server to load it: `ssh pve pct exec 103 -- docker restart jellyfin-test`
-- API tests: `python3 -I testdata/stage2_api_tests.py /tmp/claude-1000/-home-claude-homelab/ef32264d-b9eb-4152-a39e-4a0a297c4684/scratchpad/secrets`
-- Mutation check (about 8 minutes): `python3 -I devtools/mutation_check.py` (needs `/opt/jellyfin-test/src/sqe-mut`, created with `ssh pve pct exec 103 -- mkdir /opt/jellyfin-test/src/sqe-mut` and `ssh pve pct exec 103 -- chown 1000:1000 /opt/jellyfin-test/src/sqe-mut`)
-- Stop the test server again: `ssh pve pct exec 103 -- docker stop jellyfin-test`
+- Unit tests (all integration tests required): `DOCKER_FLAGS="-v $SQE_TEST_ROOT/src/mismatch:/mismatch -v $SQE_TEST_ROOT/media:/fixtures:ro -e SQE_MISMATCH_FILE=/mismatch/file.srt -e SQE_FIXTURE_DIR=/fixtures -e SQE_REQUIRE_INTEGRATION=1" devtools/dotnet.sh test -c Release --no-build`
+- Install the plugin on the TEST server: `DOCKER_FLAGS="-v $SQE_TEST_ROOT/config/data/plugins:/plugins" devtools/dotnet.sh build src/Jellyfin.Plugin.SubtitleQuickEdit -c Release --no-incremental -o /plugins/SubtitleQuickEdit_0.2.0.0`
+- Restart the test server to load it: `$SQE_HOST_EXEC docker restart jellyfin-test`
+- API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>`
+- Mutation check (about 8 minutes): `python3 -I devtools/mutation_check.py` (needs `$SQE_TEST_ROOT/src/sqe-mut`, created with `$SQE_HOST_EXEC mkdir $SQE_TEST_ROOT/src/sqe-mut` and `$SQE_HOST_EXEC chown 1000:1000 $SQE_TEST_ROOT/src/sqe-mut`)
+- Stop the test server again: `$SQE_HOST_EXEC docker stop jellyfin-test`
 
 ## Teardown when the project is finished (nothing below is done yet)
 
-`docker rm -f jellyfin-test` on CT 103; `rm -rf /opt/jellyfin-test` (config, media, source copy and the gid-2000 fixture);
+`docker rm -f jellyfin-test` on the test host; `rm -rf $SQE_TEST_ROOT` (config, media, source copy and the gid-2000 fixture);
 `docker rmi` of the pinned Jellyfin image and of `mcr.microsoft.com/dotnet/sdk:10.0` (and the Playwright image if one is
 pulled); delete the scratchpad secrets. Nothing from this project exists on the live Jellyfin yet, so there is nothing to undo there.
 

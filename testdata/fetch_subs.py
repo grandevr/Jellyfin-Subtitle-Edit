@@ -9,7 +9,7 @@ import sys
 import urllib.error
 import urllib.request
 
-BASE = os.environ.get("JF_BASE", "http://192.168.0.21:8097")
+BASE = os.environ.get("JF_BASE") or sys.exit("set JF_BASE to the test server URL")
 sdir, item, idx = sys.argv[1:4]
 fmt = sys.argv[4] if len(sys.argv) > 4 else "vtt"
 tok = open(os.path.join(sdir, "token")).read()

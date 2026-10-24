@@ -1,6 +1,6 @@
 #!/bin/sh
 # Run inside the test Jellyfin container as uid 1000:
-#   ssh pve pct exec 103 -- docker exec -i -u 1000 jellyfin-test sh -s < make_videos.sh
+#   $SQE_HOST_EXEC docker exec -i -u 1000 $SQE_CONTAINER sh -s < make_videos.sh
 # Creates two 60 s test videos next to the generated .srt files.
 set -e
 D="/data/TestShow/Season 01"
