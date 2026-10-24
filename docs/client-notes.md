@@ -218,3 +218,15 @@ the panel is a full-width bottom sheet of at most 60 % of the height, so the vid
 button is at least 44 px high, the time fields of the new-line form fit on one row each, and nothing scrolls sideways.
 Taps work like clicks. The 44 px rule applies under 600 px or on a coarse pointer (touch screens of any size).
 
+
+## The custom subtitle renderer (found on a live 12.3.0 server)
+
+jellyfin-web has a second way to draw external text subtitles: when the user's subtitle setting asks for it
+(`useCustomSubtitles`), it fetches the cues once and writes the current one into `.videoSubtitles .videoSubtitlesInner`
+on every `timeupdate`, and the `<video>` has **no text track at all**. The 3e Reload looked only for `manualTrack`, so on
+such a page it reported "no subtitle track" although the session command had already reloaded the text.
+
+The client now handles both: `subtitleRenderer()` says `native`, `custom` or `none` (also in `debugState()`). Reload
+accepts the custom element coming back and seeks to the current time so jellyfin-web redraws it. Staged changes are shown
+before saving: in a native track by changing the cue text (new lines are added as cues), in the custom renderer by
+writing the element after jellyfin-web's own `timeupdate` handler (registered earlier, so it runs first).

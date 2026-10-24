@@ -301,6 +301,14 @@ def admin_editing(browser, pages):
     r2 = rows()
     check("editing the same line again updates its row", len(r2) == 1 and r2[0].endswith(prv["text"] + " Y"), repr(r2))
 
+    def track_text(cue):
+        return page.evaluate("""(t) => { const v = document.querySelector('video.htmlvideoplayer');
+            const tr = Array.from(v.textTracks).find((x) => x.label === 'manualTrack');
+            const c = tr && tr.cues ? Array.from(tr.cues).find((x) => x.startTime <= t && t < x.endTime) : null;
+            return c ? c.text.replace(/[\u200e\u200f]/g, '') : null; }""", (cue["start"] + cue["end"]) / 2000.0)
+
+    check("an applied edit shows in the player before it is saved", track_text(prv) == prv["text"] + " Y", repr(track_text(prv)))
+
     page.locator(".sqe-next").click()
     page.wait_for_timeout(300)
     page.locator(".sqe-change").first.click()
@@ -309,6 +317,7 @@ def admin_editing(browser, pages):
           "shown %r, video %r" % (shown(), video_state(page)))
     page.locator(".sqe-undo").first.click()
     page.wait_for_timeout(200)
+    check("undo puts the player's text back", track_text(prv) == prv["text"], repr(track_text(prv)))
     check("undo removes the staged edit", rows() == [] and
           page.locator(".sqe-panel .sqe-cue-text").first.input_value() == prv["text"])
     st, after_file = api("GET", "/SubtitleQuickEdit/Items/%s/Subtitles/%d/Cues" % (movie, en), token=TOKEN)
