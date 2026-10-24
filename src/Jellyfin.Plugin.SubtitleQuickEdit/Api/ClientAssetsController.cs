@@ -18,8 +18,9 @@ namespace Jellyfin.Plugin.SubtitleQuickEdit.Api;
 [AllowAnonymous]
 public class ClientAssetsController : ControllerBase
 {
-    private static readonly Asset Script = Asset.Load("Client.quickedit.js", "text/javascript; charset=utf-8");
-    private static readonly Asset Style = Asset.Load("Client.quickedit.css", "text/css; charset=utf-8");
+    // The script is the logic module followed by the page code, served as one file so the page needs one request.
+    private static readonly Asset Script = Asset.Load("text/javascript; charset=utf-8", "Client.logic.js", "Client.quickedit.js");
+    private static readonly Asset Style = Asset.Load("text/css; charset=utf-8", "Client.quickedit.css");
 
     /// <summary>
     /// Gets the client script.
@@ -65,13 +66,20 @@ public class ClientAssetsController : ControllerBase
 
         public string ETag { get; }
 
-        public static Asset Load(string resourceName, string contentType)
+        public static Asset Load(string contentType, params string[] resourceNames)
         {
             Assembly assembly = typeof(ClientAssetsController).Assembly;
-            using Stream stream = assembly.GetManifestResourceStream(resourceName)
-                ?? throw new InvalidOperationException("The embedded client file " + resourceName + " is missing from the plugin.");
             using var buffer = new MemoryStream();
-            stream.CopyTo(buffer);
+            foreach (string resourceName in resourceNames)
+            {
+                using Stream stream = assembly.GetManifestResourceStream(resourceName)
+                    ?? throw new InvalidOperationException("The embedded client file " + resourceName + " is missing from the plugin.");
+                stream.CopyTo(buffer);
+
+                // A line break between files, so a file without a final newline cannot run into the next one.
+                buffer.WriteByte((byte)'\n');
+            }
+
             return new Asset(buffer.ToArray(), contentType);
         }
     }

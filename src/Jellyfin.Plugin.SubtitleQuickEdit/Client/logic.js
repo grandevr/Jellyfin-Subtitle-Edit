@@ -180,7 +180,8 @@
 
     /**
      * The prefilled times of a new line: start = now, end = start + 2 s, or the next cue's start if that comes sooner,
-     * but never less than 0.5 s after the start, and not past the runtime when that is known.
+     * but never less than 0.5 s after the start, and not past the runtime when that is known (near the end the start
+     * moves back so the line still lasts 0.5 s).
      */
     function defaultNewLine(cues, nowMs, runtimeMs) {
         const startMs = Math.max(0, Math.round(nowMs));
@@ -195,7 +196,9 @@
         }
 
         if (typeof runtimeMs === 'number' && isFinite(runtimeMs) && endMs > runtimeMs) {
-            endMs = runtimeMs;
+            // Near the end of the video, keep the line valid by moving the start back rather than shrinking the line.
+            endMs = Math.max(0, Math.round(runtimeMs));
+            return { startMs: Math.max(0, Math.min(startMs, endMs - MIN_DEFAULT_LENGTH_MS)), endMs: endMs };
         }
 
         return { startMs: startMs, endMs: endMs };
@@ -226,7 +229,8 @@
 
     // ---- text and new-line checks (the same rules the server applies) ----------------------------------------------
 
-    const TIME_LINE_PATTERN = /\d+:\d+:\d+[,.]\d+\s*-->\s*\d+:\d+:\d+[,.]\d+/;
+    // The server's time-line pattern (SrtPatterns.TimeLine): a line that starts with a cue time line.
+    const TIME_LINE_PATTERN = /^\s*\d{1,3}:\d{1,2}:\d{1,2}[,.]\d{1,3}\s*-->\s*\d{1,3}:\d{1,2}:\d{1,2}[,.]\d{1,3}/;
 
     /** CRLF and CR become LF, like the server does before it checks text. */
     function normalizeText(value) {

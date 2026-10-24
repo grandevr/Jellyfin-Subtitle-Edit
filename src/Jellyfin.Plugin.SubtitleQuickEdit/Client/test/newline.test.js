@@ -44,6 +44,14 @@ test('default new line: the end stops at the runtime', () => {
     assert.deepEqual(L.defaultNewLine([], 10000, 60000), { startMs: 10000, endMs: 12000 });
 });
 
+test('default new line: near the runtime the start moves back so the line stays 0.5 s long and valid', () => {
+    assert.deepEqual(L.defaultNewLine([], 59800, 60000), { startMs: 59500, endMs: 60000 });
+    assert.deepEqual(L.defaultNewLine([], 60000, 60000), { startMs: 59500, endMs: 60000 });
+    assert.deepEqual(L.defaultNewLine([], 200, 300), { startMs: 0, endMs: 300 });
+    const line = L.defaultNewLine([], 59950, 60000);
+    assert.equal(L.validateNewLine({ startMs: line.startMs, endMs: line.endMs, text: 'x' }, { runtimeMs: 60000 }).ok, true);
+});
+
 // ---- overlaps -------------------------------------------------------------------------------------------------
 
 const SPAN = [cue(1, 0, 1000), cue(2, 1000, 2000), cue(3, 1500, 3000), cue(4, 5000, 6000)];
@@ -79,6 +87,9 @@ test('validateCueText accepts ordinary text and normalizes line breaks', () => {
     assert.deepEqual(L.validateCueText('tab\tseparated'), { ok: true, text: 'tab\tseparated' });
     assert.deepEqual(L.validateCueText('<i>tags</i> & {\\an8}'), { ok: true, text: '<i>tags</i> & {\\an8}' });
     assert.equal(L.validateCueText('--> not a time line').ok, true);
+    // Same rule as the server: only a line that starts with a time line is refused.
+    assert.equal(L.validateCueText('he said 00:00:01,000 --> 00:00:02,000').ok, true);
+    assert.equal(L.validateCueText('  00:00:01,000 --> 00:00:02,000').ok, false);
 });
 
 test('validateCueText rejects what the server rejects', () => {
