@@ -36,3 +36,26 @@ test('it makes no network or page calls of its own', () => {
         assert.equal(code.includes(word), false, 'logic.js must not use ' + word);
     });
 });
+
+const pageFile = path.join(__dirname, '..', 'quickedit.js');
+const pageSource = fs.readFileSync(pageFile, 'utf8');
+const pageCode = pageSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+
+test('the page code parses and avoids ?. and ?? as well', () => {
+    assert.doesNotThrow(() => new vm.Script(pageSource));
+    assert.equal(/\?\.[A-Za-z_$(\[]/.test(pageCode), false, 'optional chaining found');
+    assert.equal(/\?\?/.test(pageCode), false, 'nullish coalescing found');
+});
+
+test('every logic function the page code calls exists', () => {
+    const L = require('./load.js');
+    const used = new Set();
+    pageCode.replace(/\bL\.([A-Za-z_$][\w$]*)/g, (m, name) => used.add(name));
+    assert.ok(used.size > 0);
+    used.forEach((name) => assert.notEqual(L[name], undefined, 'logic.js does not export ' + name));
+});
+
+test('the page code never logs a URL or a token', () => {
+    const logs = pageCode.match(/console\.\w+\([^)]*\)/g) || [];
+    logs.forEach((call) => assert.equal(/getUrl|accessToken|ApiKey|src/.test(call), false, call));
+});
