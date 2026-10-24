@@ -679,6 +679,15 @@
             return summary;
         }
 
+        /** Forgets saved rows (when the panel closes, the list keeps only what is still unsaved). Returns how many. */
+        dropSaved() {
+            const before = this.rows.length;
+            this.rows = this.rows.filter(function (r) {
+                return r.status !== 'saved';
+            });
+            return before - this.rows.length;
+        }
+
         /** The rows worth keeping across a page reload: everything not saved, as plain data. */
         serialize() {
             return {

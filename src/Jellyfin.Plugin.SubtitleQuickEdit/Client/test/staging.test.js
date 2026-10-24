@@ -382,3 +382,17 @@ test('an error only marks rows that were part of the save', () => {
     assert.equal(r.action, 'show-error');
     assert.equal(m.snapshot()[1].status, 'staged');
 });
+
+test('dropSaved forgets saved rows and keeps staged and failed ones', () => {
+    const m = new L.StagingModel();
+    m.setCues([{ index: 1, start: 0, end: 1000, text: 'a' }, { index: 2, start: 2000, end: 3000, text: 'b' }, { index: 3, start: 4000, end: 5000, text: 'c' }], 'h1');
+    m.stageEdit(m.cues[0], 'A');
+    const save = m.prepareSave();
+    m.applySaveSuccess(save.rowIds, { hash: 'h2', savedCueIndexes: [1], addedCues: {} });
+    m.stageEdit(m.cues[1], 'B');
+    m.stageEdit(m.cues[2], 'C');
+    m.applySaveError([m.rows[2].rowId], 400, { code: 'InvalidEdit', message: 'no', cueIndex: 3 });
+    assert.equal(m.dropSaved(), 1);
+    assert.deepEqual(m.rows.map((r) => r.status), ['staged', 'failed']);
+    assert.equal(m.dropSaved(), 0);
+});

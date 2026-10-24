@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Stage 3 browser tests (3c button and panel, 3d editing), in headless Chromium against the THROWAWAY test Jellyfin.
+"""Stage 3 browser tests (3c button and panel, 3d editing, 3e saving), in headless Chromium against the THROWAWAY
+test Jellyfin. The saving checks change "TestWebm 01" subtitles through the editor and put the original text back.
 
 Runs inside the Playwright image (sqe-playwright:1.64.1, Playwright for Python) on a host that can reach JF_BASE:
   docker run --rm -i -e JF_BASE -v <folder holding testdata/browser>:/sqe:ro sqe-playwright:1.64.1 \
@@ -303,6 +304,166 @@ def admin_editing(browser, pages):
     ctx.close()
 
 
+def restore_texts(item_id, index, original_cues):
+    """Puts every line of a subtitle back to its original text through the API (an edit with the old text is a no-op)."""
+    body = cues_full(item_id, index)
+    back = {c["index"]: c["text"] for c in original_cues}
+    edits = [{"type": "edit", "cueIndex": c["index"], "oldText": c["text"], "newText": back[c["index"]]}
+             for c in body["cues"] if c["index"] in back and c["text"] != back[c["index"]]]
+    if edits:
+        st, _ = api("POST", "/SubtitleQuickEdit/Items/%s/Subtitles/%d/Edits" % (item_id, index),
+                    {"baseHash": body["hash"], "edits": edits}, token=TOKEN)
+        if st != 200:
+            print("     WARNING: could not restore the test subtitle (HTTP %s)" % st, flush=True)
+
+
+def cues_full(item_id, index):
+    st, body = api("GET", "/SubtitleQuickEdit/Items/%s/Subtitles/%d/Cues" % (item_id, index), token=TOKEN)
+    if st != 200:
+        sys.exit("Cues call failed (HTTP %s)" % st)
+    return body
+
+
+def api_edit(item_id, index, cue_index, new_text):
+    body = cues_full(item_id, index)
+    old = [c for c in body["cues"] if c["index"] == cue_index][0]["text"]
+    st, res = api("POST", "/SubtitleQuickEdit/Items/%s/Subtitles/%d/Edits" % (item_id, index),
+                  {"baseHash": body["hash"], "edits": [{"type": "edit", "cueIndex": cue_index, "oldText": old, "newText": new_text}]},
+                  token=TOKEN)
+    return st, res
+
+
+def admin_saving(browser, pages):
+    """3e: Save, Reload subtitles, a file changed on disk, drafts across a page reload, a Windows-1250 round trip."""
+    movie = MOVIES["TestWebm 01"]
+    t1 = tracks(movie)
+    srt = [t for t in t1 if t["external"] and t["format"] == "srt" and t["editable"]]
+    en = ([t for t in srt if t.get("language") in ("en", "eng")] or srt)[0]["streamIndex"]
+    pl = [t for t in srt if t.get("language") in ("pl", "pol")]
+    pl = pl[0]["streamIndex"] if pl else None
+    original_en = cues_full(movie, en)
+    original_pl = cues_full(movie, pl) if pl is not None else None
+    dialogs = []
+    ctx = browser.new_context(viewport={"width": 1280, "height": 720})
+    page = ctx.new_page()
+    pages.append(page)
+    page.on("dialog", lambda d: (dialogs.append(d.type), d.accept()))
+
+    def status():
+        return page.locator(".sqe-panel .sqe-status").text_content() or ""
+
+    def wait_status(text, seconds=15):
+        page.wait_for_function("(t) => { const s = document.querySelector('.sqe-panel .sqe-status');"
+                               " return s && s.textContent.indexOf(t) >= 0; }", arg=text, timeout=seconds * 1000)
+
+    def open_at(index, cue):
+        play(page, movie)
+        choose_subtitle(page, index)
+        seek_into(page, cue)
+        wait_button(page, True, 10)
+        show_osd(page)
+        page.locator(".sqe-edit-button").first.click()
+        page.wait_for_selector(".sqe-panel .sqe-cue-text", timeout=10000)
+
+    def rows():
+        return page.evaluate("() => Array.from(document.querySelectorAll('.sqe-change')).map((r) =>"
+                             " ({ text: r.querySelector('.sqe-change-new').textContent,"
+                             " status: r.querySelector('.sqe-badge').textContent }))")
+
+    try:
+        login(page, ADMIN_NAME, ADMIN_PW)
+        cues0 = original_en["cues"]
+        k = min(3, len(cues0) - 2)
+        cue = cues0[k]
+        open_at(en, cue)
+
+        # Save: only the edited line changes in the file.
+        box = page.locator(".sqe-panel .sqe-cue-text").first
+        box.fill(cue["text"] + " (saved)")
+        box.press("Control+Enter")
+        box.press("Control+s")
+        wait_status("Saved")
+        after = cues_full(movie, en)
+        changed = [c["index"] for c, o in zip(after["cues"], cues0) if c != o]
+        check("Save writes the staged edit and only that line changes",
+              len(after["cues"]) == len(cues0) and changed == [cue["index"]] and
+              after["cues"][k]["text"] == cue["text"] + " (saved)", "changed lines %r" % changed)
+        check("the saved row is marked saved", any(r["status"] == "saved" for r in rows()), repr(rows()))
+
+        # Reload subtitles: the player shows the new text without restarting playback.
+        page.evaluate("() => { window.__sqeVideo = document.querySelector('video.htmlvideoplayer'); }")
+        before = video_state(page)
+        page.locator(".sqe-reload").click()
+        wait_status("Subtitles reloaded", 20)
+        held = page.evaluate("""(t) => { const v = document.querySelector('video.htmlvideoplayer');
+            const tr = Array.from(v.textTracks).find((x) => x.label === 'manualTrack');
+            const c = tr && tr.cues ? Array.from(tr.cues).find((x) => x.startTime <= t && t < x.endTime) : null;
+            return { text: c ? c.text : null, same: v === window.__sqeVideo }; }""", (cue["start"] + cue["end"]) / 2000.0)
+        now_state = video_state(page)
+        check("Reload subtitles shows the new text without restarting playback",
+              held["text"] is not None and "(saved)" in held["text"] and held["same"] and now_state["paused"] and
+              abs(now_state["time"] - before["time"]) < 0.06, "track %r, video %r -> %r" % (held, before, now_state))
+
+        # The file changes on disk mid-session: Save says so and writes nothing.
+        page.locator(".sqe-next").click()
+        page.wait_for_timeout(300)
+        nxt = cues0[k + 1]
+        box = page.locator(".sqe-panel .sqe-cue-text").first
+        box.fill(nxt["text"] + " (staged)")
+        page.locator(".sqe-apply").click()
+        st, _ = api_edit(movie, en, cues0[k - 1]["index"], cues0[k - 1]["text"] + " (changed on disk)")
+        changed_hash = cues_full(movie, en)["hash"]
+        page.locator(".sqe-save").click()
+        wait_status("changed on disk")
+        check("a file changed on disk gives the \"file changed\" message and writes nothing",
+              st == 200 and cues_full(movie, en)["hash"] == changed_hash)
+        check("the edit that still matches stays staged", any(r["text"].endswith("(staged)") and r["status"] == "staged" for r in rows()),
+              repr(rows()))
+
+        # Unsaved edits survive a page reload (and leaving asks first).
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_function("() => window.ApiClient && window.ApiClient.isLoggedIn && window.ApiClient.isLoggedIn()", timeout=20000)
+        page.wait_for_timeout(1500)
+        open_at(en, nxt)
+        check("unsaved edits survive a page reload",
+              "Restored 1" in status() and any(r["text"].endswith("(staged)") and r["status"] == "staged" for r in rows()),
+              "status %r, rows %r" % (status(), rows()))
+        check("reloading with unsaved edits asks first", "beforeunload" in dialogs, repr(dialogs))
+        page.locator(".sqe-undo").first.click()
+
+        # A Windows-1250 file with Polish characters round-trips.
+        if pl is None:
+            check("TestWebm 01 has a Polish .srt", False, "none found")
+        else:
+            pcues = original_pl["cues"]
+            pcue = pcues[min(1, len(pcues) - 1)]
+            page.keyboard.press("Escape")
+            choose_subtitle(page, pl)
+            seek_into(page, pcue)
+            wait_button(page, True, 10)
+            show_osd(page)
+            page.locator(".sqe-edit-button").first.click()
+            page.wait_for_selector(".sqe-panel .sqe-cue-text", timeout=10000)
+            box = page.locator(".sqe-panel .sqe-cue-text").first
+            box.fill(pcue["text"] + " zażółć gęślą jaźń")
+            box.press("Control+s")
+            wait_status("Saved")
+            pafter = cues_full(movie, pl)
+            check("a Windows-1250 file with Polish characters round-trips",
+                  pafter["encoding"] == original_pl["encoding"] and
+                  [c for c in pafter["cues"] if c["index"] == pcue["index"]][0]["text"] == pcue["text"] + " zażółć gęślą jaźń",
+                  "encoding %s -> %s" % (original_pl["encoding"], pafter["encoding"]))
+        shot(page, "3e-saving")
+    finally:
+        restore_texts(movie, en, original_en["cues"])
+        if original_pl is not None:
+            restore_texts(movie, pl, original_pl["cues"])
+        restored = cues_full(movie, en)["hash"] == original_en["hash"] and (
+            original_pl is None or cues_full(movie, pl)["hash"] == original_pl["hash"])
+        check("the test subtitles are back to their original bytes", restored)
+        ctx.close()
+
+
 def admin_phone(browser, pages):
     ctx = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
     page = ctx.new_page()
@@ -343,7 +504,7 @@ def non_admin(browser, pages):
 
 with sync_playwright() as p:
     browser = p.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
-    for scenario in (admin_desktop, admin_editing, admin_phone, non_admin):
+    for scenario in (admin_desktop, admin_editing, admin_saving, admin_phone, non_admin):
         pages = []
         try:
             scenario(browser, pages)
