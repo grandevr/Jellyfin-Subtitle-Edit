@@ -1,6 +1,6 @@
 #!/bin/sh
 # Run inside the test Jellyfin container as uid 1000:
-#   $SQE_HOST_EXEC docker exec -i -u 1000 $SQE_CONTAINER sh -s < make_ep3.sh
+#   . devtools/env.sh; sqe_host docker exec -i -u 1000 "$SQE_CONTAINER" sh -s < testdata/make_ep3.sh
 # Episode 3: a video with an EMBEDDED subtitle track, plus external subtitles the editor must refuse.
 set -e
 D="/data/TestShow/Season 01"

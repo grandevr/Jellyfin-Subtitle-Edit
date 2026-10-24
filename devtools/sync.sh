@@ -8,4 +8,4 @@ tar -c --owner=1000 --group=1000 \
   --exclude=./bin --exclude='*/bin' --exclude='*/obj' --exclude=./upstream-template \
   --exclude=./template-bump --exclude=./upstream-template.tar.gz --exclude=./devtools \
   --exclude=./testdata --exclude='./*.md' . \
-  | $SQE_HOST_EXEC tar -x -C "$SQE_DIR"
+  | sqe_host tar -x -C "$SQE_DIR"

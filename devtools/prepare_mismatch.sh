@@ -4,4 +4,4 @@
 # every test run that must exercise the fallback. Test folder only: $SQE_TEST_ROOT/src/mismatch.
 set -e
 . "$(dirname "$0")/env.sh"
-$SQE_HOST_EXEC chown 1000:2000 "$SQE_TEST_ROOT/src/mismatch/file.srt"
+sqe_host chown 1000:2000 "$SQE_TEST_ROOT/src/mismatch/file.srt"

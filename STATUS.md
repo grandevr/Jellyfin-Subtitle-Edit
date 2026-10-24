@@ -110,17 +110,19 @@ Test on the test server only; deploy to live only after the whole acceptance che
 
 ## Commands to resume (each is one line; run from the project folder)
 
-- Start the test server: `$SQE_HOST_EXEC docker start jellyfin-test`
+Run `. devtools/env.sh` first (with the settings from `local.env`) so that `sqe_host` is defined.
+
+- Start the test server: `sqe_host docker start jellyfin-test`
 - Wait until it answers: `until curl -s -m 3 $JF_BASE/System/Info/Public | grep -qi '"version"'; do sleep 2; done`
 - Sync the source to the test host: `devtools/sync.sh`
 - Clean rebuild: `devtools/dotnet.sh build -c Release --no-incremental`
 - Re-arm the foreign-group fixture: `devtools/prepare_mismatch.sh`
 - Unit tests (all integration tests required): `DOCKER_FLAGS="-v $SQE_TEST_ROOT/src/mismatch:/mismatch -v $SQE_TEST_ROOT/media:/fixtures:ro -e SQE_MISMATCH_FILE=/mismatch/file.srt -e SQE_FIXTURE_DIR=/fixtures -e SQE_REQUIRE_INTEGRATION=1" devtools/dotnet.sh test -c Release --no-build`
 - Install the plugin on the TEST server: `DOCKER_FLAGS="-v $SQE_TEST_ROOT/config/data/plugins:/plugins" devtools/dotnet.sh build src/Jellyfin.Plugin.SubtitleQuickEdit -c Release --no-incremental -o /plugins/SubtitleQuickEdit_0.2.0.0`
-- Restart the test server to load it: `$SQE_HOST_EXEC docker restart jellyfin-test`
+- Restart the test server to load it: `sqe_host docker restart jellyfin-test`
 - API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>`
-- Mutation check (about 8 minutes): `python3 -I devtools/mutation_check.py` (needs `$SQE_TEST_ROOT/src/sqe-mut`, created with `$SQE_HOST_EXEC mkdir $SQE_TEST_ROOT/src/sqe-mut` and `$SQE_HOST_EXEC chown 1000:1000 $SQE_TEST_ROOT/src/sqe-mut`)
-- Stop the test server again: `$SQE_HOST_EXEC docker stop jellyfin-test`
+- Mutation check (about 8 minutes): `python3 -I devtools/mutation_check.py` (needs `$SQE_TEST_ROOT/src/sqe-mut`, created with `sqe_host mkdir $SQE_TEST_ROOT/src/sqe-mut` and `sqe_host chown 1000:1000 $SQE_TEST_ROOT/src/sqe-mut`)
+- Stop the test server again: `sqe_host docker stop jellyfin-test`
 
 ## Teardown when the project is finished (nothing below is done yet)
 

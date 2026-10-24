@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stage 2 integration tests: the plugin's server API against the THROWAWAY test Jellyfin.
-Needs JF_BASE, SQE_HOST_EXEC and SQE_TEST_ROOT (see devtools/env.sh).
+Needs JF_BASE, SQE_HOST_EXEC and SQE_TEST_ROOT (see devtools/env.sh); SQE_LOG_CMD is optional.
 
 Usage: python3 -I testdata/stage2_api_tests.py <secrets-dir>
 Needs admin.pw/token, testuser.token and limiteduser.token in <secrets-dir> (bootstrap_test_server.py and
@@ -59,8 +59,21 @@ def call(method, path, body=None, tok=ADMIN, raw=None, ctype="application/json")
         return status, raw_out.decode("utf-8", "replace")
 
 
+def host_cmd(*args):
+    """SQE_HOST_EXEC plus the command as one quoted string (see devtools/env.sh)."""
+    return HOST_EXEC + [" ".join(shlex.quote(a) for a in args)]
+
+
+def log_cmd():
+    """Command that prints the test container's last 2000 log lines: SQE_LOG_CMD if set, else docker logs on the host."""
+    custom = os.environ.get("SQE_LOG_CMD")
+    if custom:
+        return shlex.split(custom)
+    return host_cmd("docker", "logs", "--tail", "2000", CONTAINER)
+
+
 def host(*args):
-    out = subprocess.run(HOST_EXEC + list(args), capture_output=True, check=False)
+    out = subprocess.run(host_cmd(*args), capture_output=True, check=False)
     if out.returncode != 0:
         raise RuntimeError("host command failed: %s %s" % (args, out.stderr.decode()[:200]))
     return out.stdout
@@ -119,7 +132,7 @@ def set_submissions(enabled):
 
 
 def plugin_log():
-    out = subprocess.run(HOST_EXEC + ["docker", "logs", "--tail", "2000", CONTAINER], capture_output=True, text=True).stdout
+    out = subprocess.run(log_cmd(), capture_output=True, text=True).stdout
     return out.splitlines()
 
 

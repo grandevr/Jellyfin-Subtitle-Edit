@@ -7,3 +7,5 @@ artifacts
 # local test-host settings (see README)
 local.env
 *.local
+__pycache__/
+*.pyc
