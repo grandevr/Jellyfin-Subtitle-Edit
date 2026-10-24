@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Stage 3c browser tests: the edit button and the panel shell, in headless Chromium against the THROWAWAY test Jellyfin.
+"""Stage 3 browser tests (3c button and panel, 3d editing), in headless Chromium against the THROWAWAY test Jellyfin.
 
 Runs inside the Playwright image (sqe-playwright:1.64.1, Playwright for Python) on a host that can reach JF_BASE:
   docker run --rm -i -e JF_BASE -v <folder holding testdata/browser>:/sqe:ro sqe-playwright:1.64.1 \
-    python3 /sqe/testdata/browser/stage3c_tests.py
+    python3 /sqe/testdata/browser/stage3_tests.py
 (devtools/sync.sh skips testdata/, so copy testdata/browser to the test host first.)
 Reads two lines on stdin: the testadmin password, then the testuser password. Prints neither, and no tokens or URLs
 with tokens. Needs the TestWebm library (testdata/make_webm.sh). Prints PASS/FAIL per check; exit code 1 on any failure.
@@ -229,6 +229,80 @@ def admin_desktop(browser, pages):
     ctx.close()
 
 
+def admin_editing(browser, pages):
+    """3d: Previous/Next, Apply, editing a line twice, clicking a row, undo; nothing is written to the file."""
+    ctx = browser.new_context(viewport={"width": 1280, "height": 720})
+    page = ctx.new_page()
+    pages.append(page)
+    login(page, ADMIN_NAME, ADMIN_PW)
+    movie = MOVIES["TestWebm 01"]
+    en = [t for t in tracks(movie) if t["external"] and t["format"] == "srt" and t["editable"]][0]["streamIndex"]
+    st, before_file = api("GET", "/SubtitleQuickEdit/Items/%s/Subtitles/%d/Cues" % (movie, en), token=TOKEN)
+    all_cues = before_file["cues"]
+    k = min(2, len(all_cues) - 2)
+    play(page, movie)
+    choose_subtitle(page, en)
+    seek_into(page, all_cues[k])
+    show_osd(page)
+    wait_button(page, True, 10)
+    show_osd(page)
+    page.locator(".sqe-edit-button").first.click()
+    page.wait_for_selector(".sqe-panel .sqe-cue-text", timeout=10000)
+
+    def shown():
+        return page.evaluate("() => Array.from(document.querySelectorAll('.sqe-panel .sqe-cue')).map((c) =>"
+                             " Number(c.getAttribute('data-cue-index')))")
+
+    def at(cue):
+        state = video_state(page)
+        return state["paused"] and abs(state["time"] - cue["start"] / 1000.0) < 0.06
+
+    page.locator(".sqe-next").click()
+    page.wait_for_timeout(400)
+    nxt = all_cues[k + 1]
+    check("Next steps to the next line and seeks to its start", nxt["index"] in shown() and at(nxt),
+          "shown %r, video %r" % (shown(), video_state(page)))
+    page.locator(".sqe-prev").click()
+    page.wait_for_timeout(200)
+    page.locator(".sqe-prev").click()
+    page.wait_for_timeout(400)
+    prv = all_cues[k - 1]
+    check("Previous steps back and seeks", prv["index"] in shown() and at(prv),
+          "shown %r, video %r" % (shown(), video_state(page)))
+
+    def rows():
+        return page.evaluate("() => Array.from(document.querySelectorAll('.sqe-change')).map((r) =>"
+                             " r.querySelector('.sqe-change-where').textContent + '|' + r.querySelector('.sqe-change-new').textContent)")
+
+    box = page.locator(".sqe-panel .sqe-cue-text").first
+    box.fill(prv["text"] + " X")
+    box.press("Control+Enter")
+    page.wait_for_timeout(200)
+    r1 = rows()
+    check("Apply adds a row to Changes this session", len(r1) == 1 and r1[0].startswith("Line %d" % prv["index"]), repr(r1))
+    box = page.locator(".sqe-panel .sqe-cue-text").first
+    box.fill(prv["text"] + " Y")
+    page.locator(".sqe-apply").click()
+    page.wait_for_timeout(200)
+    r2 = rows()
+    check("editing the same line again updates its row", len(r2) == 1 and r2[0].endswith(prv["text"] + " Y"), repr(r2))
+
+    page.locator(".sqe-next").click()
+    page.wait_for_timeout(300)
+    page.locator(".sqe-change").first.click()
+    page.wait_for_timeout(400)
+    check("clicking a row seeks to that line", prv["index"] in shown() and at(prv),
+          "shown %r, video %r" % (shown(), video_state(page)))
+    page.locator(".sqe-undo").first.click()
+    page.wait_for_timeout(200)
+    check("undo removes the staged edit", rows() == [] and
+          page.locator(".sqe-panel .sqe-cue-text").first.input_value() == prv["text"])
+    st, after_file = api("GET", "/SubtitleQuickEdit/Items/%s/Subtitles/%d/Cues" % (movie, en), token=TOKEN)
+    check("staging writes nothing to the file", after_file["hash"] == before_file["hash"])
+    shot(page, "3d-editing")
+    ctx.close()
+
+
 def admin_phone(browser, pages):
     ctx = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
     page = ctx.new_page()
@@ -269,7 +343,7 @@ def non_admin(browser, pages):
 
 with sync_playwright() as p:
     browser = p.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
-    for scenario in (admin_desktop, admin_phone, non_admin):
+    for scenario in (admin_desktop, admin_editing, admin_phone, non_admin):
         pages = []
         try:
             scenario(browser, pages)

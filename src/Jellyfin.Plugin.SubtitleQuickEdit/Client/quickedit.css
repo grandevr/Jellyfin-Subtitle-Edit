@@ -142,3 +142,132 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
     outline: 2px solid var(--sqe-accent);
     outline-offset: 0;
 }
+
+.sqe-nav,
+.sqe-actions {
+    display: flex;
+    gap: 8px;
+    margin: 4px 0 12px;
+}
+
+.sqe-nav .sqe-button {
+    flex: 1;
+}
+
+.sqe-button {
+    padding: 8px 14px;
+    border: 1px solid var(--sqe-line);
+    border-radius: 6px;
+    background: var(--sqe-field);
+    color: var(--sqe-fg);
+    font: inherit;
+    cursor: pointer;
+}
+
+.sqe-button:hover:not(:disabled),
+.sqe-button:focus-visible {
+    border-color: var(--sqe-accent);
+}
+
+.sqe-button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.sqe-button.sqe-primary {
+    border-color: var(--sqe-accent);
+    background: var(--sqe-accent);
+    color: #fff;
+    font-weight: 600;
+}
+
+.sqe-field-error {
+    margin: 4px 0 0;
+    color: var(--sqe-error);
+    font-size: 0.9em;
+}
+
+.sqe-badge {
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 0.8em;
+    text-transform: capitalize;
+    background: var(--sqe-field);
+    color: var(--sqe-fg);
+}
+
+.sqe-badge-staged {
+    background: rgba(0, 164, 220, 0.25);
+}
+
+.sqe-badge-saved {
+    background: rgba(76, 175, 80, 0.3);
+}
+
+.sqe-badge-failed {
+    background: rgba(255, 138, 128, 0.3);
+}
+
+.sqe-changes {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--sqe-line);
+}
+
+.sqe-changes-title {
+    margin: 0 0 8px;
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.sqe-change-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.sqe-change {
+    position: relative;
+    margin-bottom: 8px;
+    padding: 8px 64px 8px 8px;
+    border: 1px solid var(--sqe-line);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.sqe-change:hover,
+.sqe-change:focus-visible {
+    border-color: var(--sqe-accent);
+}
+
+.sqe-change-top {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 4px;
+    color: var(--sqe-muted);
+    font-size: 0.9em;
+}
+
+.sqe-change-old {
+    color: var(--sqe-muted);
+    text-decoration: line-through;
+    white-space: pre-line;
+}
+
+.sqe-change-new {
+    white-space: pre-line;
+}
+
+.sqe-change-message {
+    margin-top: 4px;
+    color: var(--sqe-error);
+    font-size: 0.9em;
+}
+
+.sqe-undo {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 4px 10px;
+}

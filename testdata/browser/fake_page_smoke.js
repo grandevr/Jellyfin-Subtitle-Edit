@@ -39,6 +39,27 @@ setTimeout(() => {
   await p.keyboard.type(' f k');
   await p.keyboard.press('ArrowLeft');
   const keys = await p.evaluate(() => window.jfKeys.slice());
+  // Stage 3d: Apply, the changes list, editing a cue twice, Next/Previous, row click, undo.
+  const texts = () => p.$$eval('.sqe-cue', (els) => els.map((e) => e.getAttribute('data-cue-index') + ':' + e.querySelector('textarea').value));
+  const rows = () => p.$$eval('.sqe-change', (els) => els.map((e) => e.querySelector('.sqe-change-where').textContent + '|' + e.querySelector('.sqe-change-new').textContent));
+  await p.fill('.sqe-cue-text', 'Hello world');
+  await p.keyboard.press('Control+Enter');
+  const rows1 = await rows();
+  await p.fill('.sqe-cue-text', 'Hello, world');
+  await p.click('.sqe-apply');
+  const rows2 = await rows();
+  await p.click('.sqe-next');
+  const afterNext = await texts();
+  const prevDisabledAtStart = await p.$eval('.sqe-prev', (b) => b.disabled);
+  await p.click('.sqe-change');
+  const afterRowClick = await texts();
+  await p.click('.sqe-undo');
+  const rows3 = await rows();
+  const afterUndo = await texts();
+  await p.fill('.sqe-cue-text', 'bad\n\nblank line');
+  await p.click('.sqe-apply');
+  const fieldError = await p.$eval('.sqe-field-error', (e) => (e.hidden ? '' : e.textContent));
+  await p.focus('.sqe-cue-text');
   await p.keyboard.press('Escape');
   const open = await p.$('.sqe-panel');
   const checks = {
@@ -46,12 +67,19 @@ setTimeout(() => {
     'panel shows the cue at the current time': txt === 'Hello there',
     'the text box has focus': focused === 'sqe-cue-text',
     'no key reached the page\'s own listeners': keys.length === 0,
+    'Ctrl+Enter stages an edit and adds a row': rows1.length === 1 && rows1[0].indexOf('Hello world') > 0,
+    'editing the same cue again updates its row': rows2.length === 1 && rows2[0].indexOf('Hello, world') > 0,
+    'Next shows the next line': afterNext.join() === '2:Two',
+    'Previous is enabled after Next': prevDisabledAtStart === false,
+    'clicking a row shows its line with the staged text': afterRowClick.join() === '1:Hello, world',
+    'undo removes the row and restores the text': rows3.length === 0 && afterUndo.join() === '1:Hello there',
+    'invalid text shows an error and stages nothing': fieldError.length > 0,
     'Esc closed the panel': !open,
     'no errors in the console': logs.every((l) => !/^(error|pageerror)/.test(l)),
   };
   Object.keys(checks).forEach((k) => console.log((checks[k] ? 'PASS ' : 'FAIL ') + k));
   if (!Object.values(checks).every(Boolean)) {
-    console.log(JSON.stringify({ order, txt, focused, keys, logs }, null, 1));
+    console.log(JSON.stringify({ order, txt, focused, keys, rows1, rows2, afterNext, afterRowClick, rows3, afterUndo, fieldError, logs }, null, 1));
     process.exitCode = 1;
   }
   await b.close();

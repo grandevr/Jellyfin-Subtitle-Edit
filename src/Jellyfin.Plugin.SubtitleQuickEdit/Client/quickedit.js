@@ -2,7 +2,7 @@
  * Subtitle Quick Edit page code: the edit button in the player and the side panel.
  * Served after logic.js in the same file (see ClientAssetsController), so window.SqeLogic is already defined.
  * What jellyfin-web 12.2 looks like (selectors, load order, Sessions lag) is recorded in docs/client-notes.md.
- * Stage 3c: the button, the session state and the panel shell (it shows the cue on screen; editing comes in 3d).
+ * Stage 3d: editing the lines on screen, Previous/Next, Apply and the "Changes this session" list (Save comes in 3e).
  */
 (function () {
     'use strict';
@@ -44,7 +44,8 @@
         menu: null, // { index, at }: the last subtitle choice made in the subtitle menu
         lastOsdButton: null, // { kind: 'subtitles' | 'other', at }
         tracks: {}, // itemId -> promise of the plugin's subtitle list
-        cues: {}, // 'itemId:streamIndex' -> { hash, encoding, cues }
+        cues: {}, // 'itemId:streamIndex' -> { hash, encoding, cues }, fetched once per playback
+        models: {}, // 'itemId:streamIndex' -> StagingModel with the staged changes, kept for the life of the page
         target: null, // { itemId, streamIndex, track } when the active track is editable, else null
         panel: null, // the open panel's elements, or null
         resumeOnClose: false,
@@ -110,6 +111,7 @@
         state.isAdmin = false;
         state.tracks = {};
         state.cues = {};
+        state.models = {};
         if (!userId) {
             scheduleRefresh();
             return;
@@ -380,6 +382,35 @@
             });
     }
 
+    /** The staged changes of a track. Kept for the life of the page, so closing the panel does not lose them. */
+    function modelFor(target, loaded) {
+        const key = cacheKey(target);
+        let model = state.models[key];
+        if (!model) {
+            model = new L.StagingModel({ runtimeMs: state.session ? state.session.runtimeMs : null });
+            model.setCues(loaded.cues, loaded.hash);
+            state.models[key] = model;
+        } else if (model.baseHash !== loaded.hash) {
+            // The file changed since these edits were staged: keep what still matches, mark the rest failed.
+            model.reconcile(loaded.cues, loaded.hash);
+        } else {
+            model.setCues(loaded.cues, loaded.hash);
+        }
+
+        return model;
+    }
+
+    function button(className, text, title, onClick) {
+        const b = el('button', 'sqe-button ' + className, text);
+        b.type = 'button';
+        if (title) {
+            b.title = title;
+        }
+
+        b.addEventListener('click', onClick);
+        return b;
+    }
+
     function buildPanel() {
         const root = el('aside', 'sqe-panel');
         root.setAttribute('role', 'dialog');
@@ -397,11 +428,33 @@
         header.appendChild(close);
         const status = el('p', 'sqe-status');
         status.setAttribute('role', 'status');
+        const nav = el('div', 'sqe-nav');
+        nav.appendChild(button('sqe-prev', '‹ Previous', 'Previous line', function () {
+            step(-1);
+        }));
+        nav.appendChild(button('sqe-next', 'Next ›', 'Next line', function () {
+            step(1);
+        }));
         const cues = el('div', 'sqe-cues');
+        const actions = el('div', 'sqe-actions');
+        actions.appendChild(button('sqe-apply sqe-primary', 'Apply', 'Stage the change (Ctrl+Enter)', function () {
+            applyEdits();
+        }));
+        const changes = el('section', 'sqe-changes');
+        const changesTitle = el('h3', 'sqe-changes-title', 'Changes this session');
+        const list = el('ol', 'sqe-change-list');
+        changes.appendChild(changesTitle);
+        changes.appendChild(list);
         root.appendChild(header);
         root.appendChild(status);
+        root.appendChild(nav);
         root.appendChild(cues);
-        return { root: root, status: status, cues: cues };
+        root.appendChild(actions);
+        root.appendChild(changes);
+        nav.hidden = true;
+        actions.hidden = true;
+        changes.hidden = true;
+        return { root: root, status: status, nav: nav, cues: cues, actions: actions, changes: changes, list: list, shown: [] };
     }
 
     function showStatus(text, isError) {
@@ -418,33 +471,199 @@
         next: 'No line yet: this is the first line.',
     };
 
-    function renderCues(shown) {
-        const box = state.panel.cues;
+    /** The unsaved row of a cue, if it has one. */
+    function stagedRowFor(model, cue) {
+        return model.snapshot().filter(function (r) {
+            return r.type === 'edit' && r.cueIndex === cue.index && r.status !== 'saved';
+        })[0] || null;
+    }
+
+    function renderCues(shown, note) {
+        const panel = state.panel;
+        const box = panel.cues;
         box.textContent = '';
+        panel.shown = shown.cues;
+        panel.nav.hidden = false;
+        panel.actions.hidden = shown.cues.length === 0;
         if (shown.cues.length === 0) {
             showStatus('This subtitle has no lines.');
             return;
         }
 
-        showStatus(MODE_NOTES[shown.mode] || '');
+        showStatus(note === undefined ? (MODE_NOTES[shown.mode] || '') : note);
         shown.cues.forEach(function (cue) {
+            const row = stagedRowFor(panel.model, cue);
             const item = el('section', 'sqe-cue');
             item.setAttribute('data-cue-index', String(cue.index));
             const heading = el('div', 'sqe-cue-heading');
             heading.appendChild(el('span', 'sqe-cue-number', 'Line ' + cue.index));
             heading.appendChild(el('span', 'sqe-cue-time', L.formatTime(cue.start) + ' → ' + L.formatTime(cue.end)));
+            if (row) {
+                heading.appendChild(el('span', 'sqe-badge sqe-badge-' + row.status, row.status));
+            }
+
+            const value = row ? row.newText : cue.text;
             const text = el('textarea', 'sqe-cue-text');
-            text.value = cue.text;
-            text.rows = Math.max(2, cue.text.split('\n').length);
+            text.value = value;
+            text.rows = Math.max(2, value.split('\n').length);
             text.setAttribute('aria-label', 'Text of line ' + cue.index);
+            const error = el('p', 'sqe-field-error');
+            error.hidden = true;
             item.appendChild(heading);
             item.appendChild(text);
+            item.appendChild(error);
             box.appendChild(item);
         });
+        updateNav();
         const first = box.querySelector('textarea');
         if (first) {
             first.focus();
         }
+    }
+
+    function updateNav() {
+        const panel = state.panel;
+        const cues = panel.loaded ? panel.loaded.cues : [];
+        panel.nav.querySelector('.sqe-prev').disabled = !L.stepCue(cues, panel.shown, -1);
+        panel.nav.querySelector('.sqe-next').disabled = !L.stepCue(cues, panel.shown, 1);
+    }
+
+    /** Moves the video to a time (ms) and keeps it paused. */
+    function seekTo(ms) {
+        const video = state.video;
+        if (video && typeof ms === 'number') {
+            video.currentTime = ms / 1000;
+        }
+    }
+
+    /** Shows a cue: seeks to its start and shows every line on screen at that moment (overlaps included). */
+    function showCue(cue) {
+        seekTo(cue.start);
+        renderCues(L.cueForTime(state.panel.loaded.cues, cue.start), '');
+    }
+
+    function step(direction) {
+        const panel = state.panel;
+        if (!panel || !panel.loaded) {
+            return;
+        }
+
+        const target = L.stepCue(panel.loaded.cues, panel.shown, direction);
+        if (target) {
+            showCue(target);
+        }
+    }
+
+    /** Stages every changed text box (the Apply button and Ctrl+Enter). */
+    function applyEdits() {
+        const panel = state.panel;
+        if (!panel || !panel.model) {
+            return;
+        }
+
+        let staged = 0;
+        let removed = 0;
+        let failed = 0;
+        panel.cues.querySelectorAll('.sqe-cue').forEach(function (item) {
+            const index = Number(item.getAttribute('data-cue-index'));
+            const cue = panel.shown.filter(function (c) {
+                return c.index === index;
+            })[0];
+            const text = item.querySelector('textarea');
+            const error = item.querySelector('.sqe-field-error');
+            if (!cue) {
+                return;
+            }
+
+            const row = stagedRowFor(panel.model, cue);
+            if (L.normalizeText(text.value) === (row ? row.newText : L.normalizeText(cue.text))) {
+                return; // unchanged since the last Apply
+            }
+
+            const result = panel.model.stageEdit(cue, text.value);
+            if (!result.ok) {
+                error.textContent = result.error.message;
+                error.hidden = false;
+                failed++;
+                return;
+            }
+
+            error.hidden = true;
+            if (result.row) {
+                staged++;
+            } else if (result.removed) {
+                removed++;
+            }
+        });
+        renderChanges();
+        if (failed === 0) {
+            renderCues({ mode: 'active', cues: panel.shown }, staged + removed === 0 ? 'Nothing changed.' :
+                (staged > 0 ? 'Staged. ' : '') + (removed > 0 ? 'Back to the original text, so the change was dropped.' : ''));
+        }
+    }
+
+    function changeRow(row) {
+        const item = el('li', 'sqe-change sqe-change-' + row.status);
+        item.setAttribute('data-row-id', row.rowId);
+        const top = el('div', 'sqe-change-top');
+        const where = row.type === 'add'
+            ? 'New · ' + L.formatTime(row.startMs) + ' → ' + L.formatTime(row.endMs)
+            : 'Line ' + row.cueIndex + ' · ' + L.formatTime(row.start);
+        top.appendChild(el('span', 'sqe-change-where', where));
+        top.appendChild(el('span', 'sqe-badge sqe-badge-' + row.status, row.status));
+        item.appendChild(top);
+        if (row.type === 'add') {
+            item.appendChild(el('div', 'sqe-change-new', row.text));
+        } else {
+            item.appendChild(el('div', 'sqe-change-old', row.oldText));
+            item.appendChild(el('div', 'sqe-change-new', row.newText));
+        }
+
+        if (row.message) {
+            item.appendChild(el('div', 'sqe-change-message', row.message));
+        }
+
+        if (row.status !== 'saved') {
+            const undo = button('sqe-undo', 'Undo', 'Drop this change', function (e) {
+                e.stopPropagation();
+                state.panel.model.undo(row.rowId);
+                renderChanges();
+                renderCues({ mode: 'active', cues: state.panel.shown }, 'Change dropped.');
+            });
+            item.appendChild(undo);
+        }
+
+        item.tabIndex = 0;
+        item.title = 'Show this line';
+        item.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && e.target === item) {
+                item.click();
+            }
+        });
+        item.addEventListener('click', function () {
+            const panel = state.panel;
+            const at = row.type === 'add' ? row.startMs : row.start;
+            const cue = row.type === 'edit' ? panel.loaded.cues.filter(function (c) {
+                return c.index === row.cueIndex;
+            })[0] : null;
+            if (cue) {
+                showCue(cue);
+            } else {
+                seekTo(at);
+                renderCues(L.cueForTime(panel.loaded.cues, at), '');
+            }
+        });
+        return item;
+    }
+
+    function renderChanges() {
+        const panel = state.panel;
+        const rows = panel.model.sortedRows();
+        panel.list.textContent = '';
+        rows.forEach(function (row) {
+            panel.list.appendChild(changeRow(row));
+        });
+        panel.changes.hidden = rows.length === 0;
     }
 
     function openPanel() {
@@ -484,6 +703,8 @@
                 const t = L.secondsToMs(state.video ? state.video.currentTime : 0);
                 state.panel.target = target;
                 state.panel.loaded = loaded;
+                state.panel.model = modelFor(target, loaded);
+                renderChanges();
                 renderCues(L.cueForTime(loaded.cues, t === null ? 0 : t));
             });
         }).catch(function (err) {
@@ -526,6 +747,9 @@
             if (e.key === 'Escape') {
                 e.preventDefault();
                 closePanel();
+            } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                applyEdits();
             } else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
                 e.preventDefault(); // Save comes in stage 3e; never the browser's save dialog
             }
