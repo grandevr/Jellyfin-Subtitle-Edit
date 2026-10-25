@@ -243,7 +243,7 @@ def admin_extract(browser, pages):
         play(page)
         page.wait_for_timeout(4000)
         info("started again: subtitle index %r (embedded %d, copy %d)"
-             % ((debug(page).get("session") or {}).get("subtitleIndex"), emb["streamIndex"], new_index))
+             % ((debug(page).get("session") or {}).get("subtitleIndex"), emb2["streamIndex"] if emb2 else -1, new_index))
     finally:
         ctx.close()
         check("cleanup: the copy is deleted and the embedded track has no copy", delete_copies())

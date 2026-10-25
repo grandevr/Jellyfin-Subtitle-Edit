@@ -199,7 +199,10 @@ check("listing: the new track is external, SubRip and editable",
       new_track is not None and new_track["external"] and new_track["format"] == "srt" and new_track["editable"], new_track)
 emb_now = next((t for t in after if not t["external"]), None)
 check("listing: the embedded track is still there and points to its copy",
-      emb_now is not None and emb_now["extractedStreamIndex"] == NEW, emb_now)
+      emb_now is not None and emb_now.get("extractedStreamIndex") == NEW, emb_now)
+# Jellyfin numbers external files before the video's own streams, so the new file moves the embedded track up by one.
+EMB_BEFORE, EMB = EMB, emb_now["streamIndex"] if emb_now else EMB
+check("listing: the embedded track's index moved past the new file", EMB == EMB_BEFORE + 1, (EMB_BEFORE, EMB))
 st, c = call("GET", sub(NEW, "Cues"), tok=USER)
 check("cues: the copy reads back with the embedded line", st == 200 and [q["text"] for q in c["cues"]] == ["Embedded line"], (st, c))
 st, act = call("GET", "/System/ActivityLog/Entries?limit=30")
@@ -222,7 +225,7 @@ st, ex = call("GET", "/SubtitleQuickEdit/Extracted")
 rec = [e for e in ex if e["fileName"] == NAME] if st == 200 else []
 check("review list: one entry, made by the user, edited since, with its stream",
       len(ex) == 1 and len(rec) == 1 and rec[0]["userName"] == USER_NAME and rec[0]["edited"] and rec[0]["exists"]
-      and rec[0]["streamIndex"] == NEW and rec[0]["sourceStreamIndex"] == EMB and not rec[0]["replaced"], (st, ex))
+      and rec[0]["streamIndex"] == NEW and rec[0]["sourceStreamIndex"] == EMB_BEFORE and not rec[0]["replaced"], (st, ex))
 st, r = call("GET", "/SubtitleQuickEdit/Extracted", tok=USER)
 check("review list: users -> 403", st == 403, (st, r))
 
@@ -258,7 +261,7 @@ for _ in range(20):
         break
     time.sleep(0.5)
 check("delete: the library dropped the copy, the embedded track is still there with no copy",
-      len(final) == len(before) and any(not t["external"] and t["extractedStreamIndex"] is None for t in final), final)
+      len(final) == len(before) and any(not t["external"] and t.get("extractedStreamIndex") is None for t in final), final)
 st, r = call("DELETE", "/SubtitleQuickEdit/Extracted/%s" % RID)
 check("delete again: 404 ExtractedNotFound", st == 404 and code(r) == "ExtractedNotFound", (st, r))
 st, ex = call("GET", "/SubtitleQuickEdit/Extracted")
