@@ -188,6 +188,11 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
     outline-offset: 0;
 }
 
+/* The panel's own display rules would otherwise show what the script hid. */
+.sqe-panel [hidden] {
+    display: none !important;
+}
+
 .sqe-nav,
 .sqe-actions {
     display: flex;
