@@ -111,6 +111,40 @@ public class BackupStoreTests
     }
 
     [Fact]
+    public void Saves_in_the_same_millisecond_with_pruning_keep_the_newest()
+    {
+        // Pruning frees the oldest names; a later save in the same millisecond must not take one of them back.
+        using var dir = new TempDir();
+        string folder = Path.Combine(dir.Root, "bk");
+        var now = new DateTime(2026, 10, 25, 9, 0, 0, DateTimeKind.Utc);
+        var store = new BackupStore(folder, BackupMode.OriginalPlusLastN, 2, () => now);
+        store.BeforeSave(Item, 1, "/m/a.srt", Content.Srt("v1"));
+        for (int i = 2; i <= 6; i++)
+        {
+            store.BeforeSave(Item, 1, "/m/a.srt", Content.Srt("v" + i));
+        }
+
+        string[] saves = Directory.GetFiles(folder, "*_save.srt").OrderBy(f => f, StringComparer.Ordinal).ToArray();
+        Assert.Equal(new[] { Content.Srt("v5"), Content.Srt("v6") }, saves.Select(File.ReadAllBytes).ToArray());
+    }
+
+    [Fact]
+    public void A_clock_that_goes_back_still_gives_the_newest_name()
+    {
+        using var dir = new TempDir();
+        string folder = Path.Combine(dir.Root, "bk");
+        var now = new DateTime(2026, 10, 25, 9, 0, 0, DateTimeKind.Utc);
+        var store = new BackupStore(folder, BackupMode.OriginalPlusLastN, 5, () => now);
+        store.BeforeSave(Item, 1, "/m/a.srt", Content.Srt("v1"));
+        store.BeforeSave(Item, 1, "/m/a.srt", Content.Srt("v2"));
+        now = now.AddSeconds(-5);
+        store.BeforeSave(Item, 1, "/m/a.srt", Content.Srt("v3"));
+
+        string newest = Directory.GetFiles(folder, "*_save.srt").OrderBy(f => f, StringComparer.Ordinal).Last();
+        Assert.Equal(Content.Srt("v3"), File.ReadAllBytes(newest));
+    }
+
+    [Fact]
     public void Each_item_stream_and_file_has_its_own_original()
     {
         using var dir = new TempDir();
