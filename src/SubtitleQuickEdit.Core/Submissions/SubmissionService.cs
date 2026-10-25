@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using SubtitleQuickEdit.Core.Editing;
-using SubtitleQuickEdit.Core.Srt;
 using SubtitleQuickEdit.Core.Storage;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Submissions;
 
@@ -67,7 +67,7 @@ public sealed class SubmissionService
     /// <param name="request">What to submit.</param>
     /// <returns>The stored submission.</returns>
     /// <exception cref="SubtitleNotEditableException">The file cannot be edited.</exception>
-    /// <exception cref="SrtEditException">An edit is invalid or conflicts with the file's text.</exception>
+    /// <exception cref="SubtitleEditException">An edit is invalid or conflicts with the file's text.</exception>
     /// <exception cref="SubtitleWriteException">The file changed since the user loaded it (a conflict).</exception>
     /// <exception cref="SubmissionException">The note is too long, the user has too many pending, or storing failed.</exception>
     public Submission Submit(SubmitRequest request)
@@ -75,11 +75,11 @@ public sealed class SubmissionService
         ArgumentNullException.ThrowIfNull(request);
         if (request.Edits.Count == 0)
         {
-            throw new SrtEditException(SrtEditError.InvalidEdit, "There are no changes to submit.");
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "There are no changes to submit.");
         }
 
         string? note = CheckText(request.Note, "note");
-        SrtDocument doc = Open(request.Path);
+        ISubtitleDocument doc = Open(request.Path);
         string baseHash = request.BaseHash.Trim().ToLowerInvariant();
         if (!string.Equals(doc.Hash, baseHash, StringComparison.Ordinal))
         {
@@ -187,7 +187,7 @@ public sealed class SubmissionService
     /// <returns>The outcome.</returns>
     /// <exception cref="SubmissionException">No such submission, it is no longer pending, or the choice is invalid.</exception>
     /// <exception cref="SubtitleNotEditableException">The file cannot be edited any more.</exception>
-    /// <exception cref="SrtEditException">An edit is no longer valid for the file. Nothing was written.</exception>
+    /// <exception cref="SubtitleEditException">An edit is no longer valid for the file. Nothing was written.</exception>
     /// <exception cref="SubtitleWriteException">Writing failed. Nothing was written; the submission stays pending.</exception>
     public ApproveResult Approve(ApproveRequest request)
     {
@@ -197,13 +197,13 @@ public sealed class SubmissionService
             Submission submission = store.Find(request.Id) ?? throw NotFound();
             RequirePending(submission);
             HashSet<int> chosen = Choose(submission, request.Chosen);
-            SrtDocument doc = Open(request.Path);
+            ISubtitleDocument doc = Open(request.Path);
             bool unchanged = string.Equals(doc.Hash, submission.BaseHash, StringComparison.Ordinal);
             var outcomes = new List<EditOutcome>(submission.Edits.Count);
-            var toApply = new List<SrtEdit>();
+            var toApply = new List<SubtitleEdit>();
             for (int i = 0; i < submission.Edits.Count; i++)
             {
-                SrtEdit? edit = chosen.Contains(i) ? Resolve(doc, submission.Edits[i], unchanged) : null;
+                SubtitleEdit? edit = chosen.Contains(i) ? Resolve(doc, submission.Edits[i], unchanged) : null;
                 if (edit is not null)
                 {
                     toApply.Add(edit);
@@ -233,47 +233,47 @@ public sealed class SubmissionService
         }
     }
 
-    private static SrtDocument Open(string path)
+    private static ISubtitleDocument Open(string path)
     {
-        TrackInspection inspection = SrtTrackInspector.Inspect(path);
+        TrackInspection inspection = SubtitleTrackInspector.Inspect(path);
         return inspection.Document ?? throw new SubtitleNotEditableException(inspection.Reason ?? "The subtitle cannot be edited.");
     }
 
-    private static SubmittedEdit Describe(SrtDocument doc, SrtEdit edit) => edit switch
+    private static SubmittedEdit Describe(ISubtitleDocument doc, SubtitleEdit edit) => edit switch
     {
-        SrtTextEdit text => new SubmittedEdit
+        SubtitleTextEdit text => new SubmittedEdit
         {
             Kind = SubmittedEditKind.Edit,
             CuePosition = text.CuePosition,
             CueStartMs = doc.Cues[text.CuePosition - 1].StartMs,
             OldText = doc.Cues[text.CuePosition - 1].Text,
-            NewText = SrtParser.NormalizeBreaks(text.NewText),
+            NewText = SubtitleText.NormalizeBreaks(text.NewText),
         },
-        SrtAddCue add => new SubmittedEdit
+        SubtitleAddCue add => new SubmittedEdit
         {
             Kind = SubmittedEditKind.Add,
             ClientId = add.ClientId,
             StartMs = add.StartMs,
             EndMs = add.EndMs,
-            Text = SrtParser.NormalizeBreaks(add.Text),
+            Text = SubtitleText.NormalizeBreaks(add.Text),
         },
-        _ => throw new SrtEditException(SrtEditError.InvalidEdit, "Unknown edit type."),
+        _ => throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "Unknown edit type."),
     };
 
     // A stored edit as one to save, or null when it is a text edit whose line can no longer be found.
-    private static SrtEdit? Resolve(SrtDocument doc, SubmittedEdit edit, bool unchanged)
+    private static SubtitleEdit? Resolve(ISubtitleDocument doc, SubmittedEdit edit, bool unchanged)
     {
         if (edit.Kind == SubmittedEditKind.Add)
         {
-            return new SrtAddCue(edit.ClientId ?? string.Empty, edit.StartMs ?? 0, edit.EndMs ?? 0, edit.Text ?? string.Empty);
+            return new SubtitleAddCue(edit.ClientId ?? string.Empty, edit.StartMs ?? 0, edit.EndMs ?? 0, edit.Text ?? string.Empty);
         }
 
         string oldText = edit.OldText ?? string.Empty;
         int? position = unchanged ? edit.CuePosition : FindLine(doc, edit, oldText);
-        return position is int p ? new SrtTextEdit(p, oldText, edit.NewText ?? string.Empty) : null;
+        return position is int p ? new SubtitleTextEdit(p, oldText, edit.NewText ?? string.Empty) : null;
     }
 
-    private static int? FindLine(SrtDocument doc, SubmittedEdit edit, string oldText)
+    private static int? FindLine(ISubtitleDocument doc, SubmittedEdit edit, string oldText)
     {
         int p = edit.CuePosition ?? 0;
         if (p >= 1 && p <= doc.Cues.Count && string.Equals(doc.Cues[p - 1].Text, oldText, StringComparison.Ordinal))
@@ -281,7 +281,7 @@ public sealed class SubmissionService
             return p;
         }
 
-        List<SrtCue> same = doc.Cues
+        List<SubtitleCue> same = doc.Cues
             .Where(c => c.StartMs == edit.CueStartMs && string.Equals(c.Text, oldText, StringComparison.Ordinal))
             .ToList();
         return same.Count == 1 ? same[0].Position : null;

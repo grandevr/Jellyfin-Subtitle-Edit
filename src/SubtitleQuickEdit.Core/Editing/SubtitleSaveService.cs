@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using SubtitleQuickEdit.Core.Srt;
 using SubtitleQuickEdit.Core.Storage;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Editing;
 
@@ -37,23 +37,23 @@ public sealed class SubtitleSaveService
     /// <param name="request">What to save.</param>
     /// <returns>The outcome.</returns>
     /// <exception cref="SubtitleNotEditableException">The file cannot be edited.</exception>
-    /// <exception cref="SrtEditException">An edit is invalid or conflicts with the file's text. Nothing was changed.</exception>
+    /// <exception cref="SubtitleEditException">An edit is invalid or conflicts with the file's text. Nothing was changed.</exception>
     /// <exception cref="SubtitleWriteException">The file changed since it was loaded, or writing failed.</exception>
     public SaveResult Save(SaveRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (request.Edits.Count == 0)
         {
-            throw new SrtEditException(SrtEditError.InvalidEdit, "There are no edits to save.");
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "There are no edits to save.");
         }
 
-        TrackInspection inspection = SrtTrackInspector.Inspect(request.Path);
+        TrackInspection inspection = SubtitleTrackInspector.Inspect(request.Path);
         if (inspection.Document is null)
         {
             throw new SubtitleNotEditableException(inspection.Reason ?? "The subtitle cannot be edited.");
         }
 
-        SrtDocument doc = inspection.Document;
+        ISubtitleDocument doc = inspection.Document;
         string baseHash = request.BaseHash.Trim().ToLowerInvariant();
         if (!string.Equals(doc.Hash, baseHash, StringComparison.Ordinal))
         {
@@ -63,8 +63,8 @@ public sealed class SubtitleSaveService
                 currentHash: doc.Hash);
         }
 
-        SrtApplyResult applied = doc.Apply(request.Edits, request.RuntimeMs);
-        byte[] current = doc.Data.ToArray();
+        SubtitleApplyResult applied = doc.Apply(request.Edits, request.RuntimeMs);
+        byte[] current = doc.Content.ToArray();
         backups.BeforeSave(request.ItemId, request.StreamIndex, request.Path, current);
         if (request.KeepRestorePoint)
         {
@@ -105,7 +105,7 @@ public sealed class SubtitleSaveService
             throw ReadFailure("the subtitle file", ex);
         }
 
-        string currentHash = SrtDocument.ComputeHash(current);
+        string currentHash = SubtitleHash.Compute(current);
         if (!string.Equals(currentHash, baseHash, StringComparison.Ordinal))
         {
             throw new SubtitleWriteException(

@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 using Xunit;
 
 namespace SubtitleQuickEdit.Core.Tests;
@@ -22,7 +23,7 @@ public class SrtRoundTripTests
     {
         SrtDocument doc = SrtDocument.Parse(fixture.Data).Document!;
 
-        SrtApplyResult result = doc.Apply(Array.Empty<SrtEdit>());
+        SubtitleApplyResult result = doc.Apply(Array.Empty<SubtitleEdit>());
 
         Assert.Equal(fixture.Data, result.Content.ToArray());
         Assert.Equal(doc.Hash, result.Hash);
@@ -33,9 +34,9 @@ public class SrtRoundTripTests
     public void Replacing_every_cue_with_its_own_text_is_byte_identical(Fixtures.Fixture fixture)
     {
         SrtDocument doc = SrtDocument.Parse(fixture.Data).Document!;
-        List<SrtEdit> edits = doc.Cues.Select(c => (SrtEdit)new SrtTextEdit(c.Position, c.Text, c.Text)).ToList();
+        List<SubtitleEdit> edits = doc.Cues.Select(c => (SubtitleEdit)new SubtitleTextEdit(c.Position, c.Text, c.Text)).ToList();
 
-        SrtApplyResult result = doc.Apply(edits);
+        SubtitleApplyResult result = doc.Apply(edits);
 
         Assert.Equal(fixture.Data, result.Content.ToArray());
     }
@@ -45,7 +46,7 @@ public class SrtRoundTripTests
     {
         byte[] data = Fixtures.Malformed();
 
-        SrtApplyResult result = SrtDocument.Parse(data).Document!.Apply(Array.Empty<SrtEdit>());
+        SubtitleApplyResult result = SrtDocument.Parse(data).Document!.Apply(Array.Empty<SubtitleEdit>());
 
         Assert.Equal(data, result.Content.ToArray());
     }
@@ -56,10 +57,10 @@ public class SrtRoundTripTests
         byte[] data = Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.English)));
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        SrtApplyResult result = doc.Apply(Array.Empty<SrtEdit>());
+        SubtitleApplyResult result = doc.Apply(Array.Empty<SubtitleEdit>());
         result.Content.ToArray()[0] = 0;
 
-        Assert.Equal(data, doc.Apply(Array.Empty<SrtEdit>()).Content.ToArray());
+        Assert.Equal(data, doc.Apply(Array.Empty<SubtitleEdit>()).Content.ToArray());
     }
 
     [Fact]
@@ -73,12 +74,12 @@ public class SrtRoundTripTests
             Assert.True(parsed.Document is not null, $"round {round} (polish={polish}): {parsed.FailureReason}");
             SrtDocument doc = parsed.Document!;
             Assert.Equal(texts, doc.Cues.Select(c => c.Text).ToArray());
-            Assert.Equal(data, doc.Apply(Array.Empty<SrtEdit>()).Content.ToArray());
+            Assert.Equal(data, doc.Apply(Array.Empty<SubtitleEdit>()).Content.ToArray());
 
             int pos = random.Next(1, doc.Cues.Count + 1);
             string newText = RandomText(random, polish);
-            SrtCue cue = doc.Cues[pos - 1];
-            SrtApplyResult edited = doc.Apply(new SrtEdit[] { new SrtTextEdit(pos, cue.Text, newText) });
+            SubtitleCue cue = doc.Cues[pos - 1];
+            SubtitleApplyResult edited = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(pos, cue.Text, newText) });
             byte[] after = edited.Content.ToArray();
 
             int from = doc.ByteOffset(cue.Layout.TextStart);

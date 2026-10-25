@@ -16,9 +16,9 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using SubtitleQuickEdit.Core.Editing;
-using SubtitleQuickEdit.Core.Srt;
 using SubtitleQuickEdit.Core.Storage;
 using SubtitleQuickEdit.Core.Submissions;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace Jellyfin.Plugin.SubtitleQuickEdit.Api;
 
@@ -107,7 +107,7 @@ public partial class SubtitleQuickEditController
             return Error(StatusCodes.Status400BadRequest, "InvalidRequest", "The request needs a baseHash.");
         }
 
-        List<SrtEdit>? edits = MapEdits(body.Edits, out ObjectResult? invalid);
+        List<SubtitleEdit>? edits = MapEdits(body.Edits, out ObjectResult? invalid);
         if (edits is null)
         {
             return invalid!;
@@ -128,7 +128,7 @@ public partial class SubtitleQuickEditController
                 RuntimeMs(item),
                 Math.Max(1, Config().MaxPendingSubmissionsPerUser)));
         }
-        catch (SrtEditException ex)
+        catch (SubtitleEditException ex)
         {
             return EditError(ex);
         }
@@ -335,7 +335,7 @@ public partial class SubtitleQuickEditController
         {
             return SubmissionProblem(ex);
         }
-        catch (SrtEditException ex)
+        catch (SubtitleEditException ex)
         {
             return EditError(ex);
         }

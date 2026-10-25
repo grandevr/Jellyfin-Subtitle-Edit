@@ -5,6 +5,7 @@ using System.Linq;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace Jellyfin.Plugin.SubtitleQuickEdit.Services;
 
@@ -44,7 +45,8 @@ public sealed class SubtitleTrackResolver
         mediaSourceManager.GetMediaStreams(item.Id).Where(s => s.Type == MediaStreamType.Subtitle).OrderBy(s => s.Index).ToList();
 
     /// <summary>
-    /// Resolves a subtitle stream of an item to an external .srt file, or says why that is not possible.
+    /// Resolves a subtitle stream of an item to an external subtitle file in a format the editor handles, or says why
+    /// that is not possible.
     /// </summary>
     /// <param name="item">The item.</param>
     /// <param name="streamIndex">The stream index.</param>
@@ -68,9 +70,9 @@ public sealed class SubtitleTrackResolver
             return new TrackResolution(stream, null, 400, "NotEditable", "The subtitle is not a local file.");
         }
 
-        if (!path.EndsWith(".srt", StringComparison.OrdinalIgnoreCase))
+        if (!SubtitleFormats.IsEditable(path))
         {
-            return new TrackResolution(stream, null, 400, "NotEditable", "Only SubRip (.srt) subtitles can be edited.");
+            return new TrackResolution(stream, null, 400, "NotEditable", SubtitleFormats.UnsupportedMessage);
         }
 
         return new TrackResolution(stream, path, 200, null, null);

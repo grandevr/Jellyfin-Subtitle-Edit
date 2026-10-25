@@ -1,21 +1,21 @@
 using System;
 using System.Collections.Generic;
 
-namespace SubtitleQuickEdit.Core.Srt;
+namespace SubtitleQuickEdit.Core.Subtitles;
 
 /// <summary>
-/// The result of <see cref="SrtDocument.Apply"/>.
+/// The result of <see cref="ISubtitleDocument.Apply"/>.
 /// </summary>
-public sealed class SrtApplyResult
+public sealed class SubtitleApplyResult
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="SrtApplyResult"/> class.
+    /// Initializes a new instance of the <see cref="SubtitleApplyResult"/> class.
     /// </summary>
     /// <param name="content">The new file content.</param>
     /// <param name="hash">SHA-256 of <paramref name="content"/>, lower-case hex.</param>
     /// <param name="addedCuePositions">For each added cue's client id, its 1-based position (and number) in the new file.</param>
     /// <param name="editedCuePositions">The 1-based positions, in the new file, of the cues whose text was edited.</param>
-    public SrtApplyResult(
+    public SubtitleApplyResult(
         ReadOnlyMemory<byte> content,
         string hash,
         IReadOnlyDictionary<string, int> addedCuePositions,

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using SubtitleQuickEdit.Core.Srt;
 using SubtitleQuickEdit.Core.Storage;
+using SubtitleQuickEdit.Core.Subtitles;
 using Xunit;
 
 namespace SubtitleQuickEdit.Core.Tests;
@@ -449,11 +450,11 @@ public class SafeFileWriterTests
         byte[] original = Fixtures.Windows1250(Fixtures.Render(Fixtures.Cues(Fixtures.Polish), "\r\n"));
         string path = dir.Write("movie.pl.srt", original);
         SrtDocument doc = SrtDocument.Parse(File.ReadAllBytes(path)).Document!;
-        SrtApplyResult result = doc.Apply(
-            new SrtEdit[]
+        SubtitleApplyResult result = doc.Apply(
+            new SubtitleEdit[]
             {
-                new SrtTextEdit(4, doc.Cues[3].Text, "Nowa, poprawiona kwestia: żółć."),
-                new SrtAddCue("n", 100, 900, "Na początku"),
+                new SubtitleTextEdit(4, doc.Cues[3].Text, "Nowa, poprawiona kwestia: żółć."),
+                new SubtitleAddCue("n", 100, 900, "Na początku"),
             });
 
         WriteOutcome outcome = new SafeFileWriter(new RefusingMetadata()).Write(path, result.Content, doc.Hash);

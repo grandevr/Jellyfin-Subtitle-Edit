@@ -18,9 +18,9 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using SubtitleQuickEdit.Core.Editing;
-using SubtitleQuickEdit.Core.Srt;
 using SubtitleQuickEdit.Core.Storage;
 using SubtitleQuickEdit.Core.Submissions;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace Jellyfin.Plugin.SubtitleQuickEdit.Api;
 
@@ -121,7 +121,7 @@ public partial class SubtitleQuickEditController : ControllerBase
             }
             else
             {
-                TrackInspection inspection = SrtTrackInspector.Inspect(resolution.Path);
+                TrackInspection inspection = SubtitleTrackInspector.Inspect(resolution.Path);
                 dto.Editable = inspection.Editable;
                 dto.Reason = inspection.Reason;
             }
@@ -163,13 +163,13 @@ public partial class SubtitleQuickEditController : ControllerBase
             return Error(resolution.Status, resolution.Code!, resolution.Message!);
         }
 
-        TrackInspection inspection = SrtTrackInspector.Inspect(resolution.Path);
+        TrackInspection inspection = SubtitleTrackInspector.Inspect(resolution.Path);
         if (inspection.Document is null)
         {
             return Error(StatusCodes.Status422UnprocessableEntity, "NotEditable", inspection.Reason ?? "The subtitle cannot be edited.");
         }
 
-        SrtDocument doc = inspection.Document;
+        ISubtitleDocument doc = inspection.Document;
         return new CuesResponse
         {
             Hash = doc.Hash,
@@ -236,7 +236,7 @@ public partial class SubtitleQuickEditController : ControllerBase
             return Error(StatusCodes.Status400BadRequest, "InvalidRequest", "The request needs a baseHash.");
         }
 
-        List<SrtEdit>? edits = MapEdits(request.Edits, out ObjectResult? invalid);
+        List<SubtitleEdit>? edits = MapEdits(request.Edits, out ObjectResult? invalid);
         if (edits is null)
         {
             return invalid!;
@@ -271,7 +271,7 @@ public partial class SubtitleQuickEditController : ControllerBase
                 WriteMethod = result.Method.ToString(),
             };
         }
-        catch (SrtEditException ex)
+        catch (SubtitleEditException ex)
         {
             return EditError(ex);
         }
@@ -407,10 +407,10 @@ public partial class SubtitleQuickEditController : ControllerBase
         }
     }
 
-    private static List<SrtEdit>? MapEdits(IReadOnlyList<EditDto> dtos, out ObjectResult? invalid)
+    private static List<SubtitleEdit>? MapEdits(IReadOnlyList<EditDto> dtos, out ObjectResult? invalid)
     {
         invalid = null;
-        var edits = new List<SrtEdit>(dtos.Count);
+        var edits = new List<SubtitleEdit>(dtos.Count);
         for (int i = 0; i < dtos.Count; i++)
         {
             EditDto dto = dtos[i];
@@ -418,13 +418,13 @@ public partial class SubtitleQuickEditController : ControllerBase
             switch (dto?.Type)
             {
                 case "edit" when dto.CueIndex is >= 1 && dto.OldText is not null && dto.NewText is not null:
-                    edits.Add(new SrtTextEdit(dto.CueIndex.Value, dto.OldText, dto.NewText));
+                    edits.Add(new SubtitleTextEdit(dto.CueIndex.Value, dto.OldText, dto.NewText));
                     break;
                 case "edit":
                     invalid = ErrorObject(StatusCodes.Status400BadRequest, "InvalidEdit", at + "an edit needs cueIndex (1 or more), oldText and newText.");
                     return null;
                 case "add" when dto.ClientId is not null && dto.StartMs.HasValue && dto.EndMs.HasValue && dto.Text is not null:
-                    edits.Add(new SrtAddCue(dto.ClientId, dto.StartMs.Value, dto.EndMs.Value, dto.Text));
+                    edits.Add(new SubtitleAddCue(dto.ClientId, dto.StartMs.Value, dto.EndMs.Value, dto.Text));
                     break;
                 case "add":
                     invalid = ErrorObject(
@@ -454,12 +454,12 @@ public partial class SubtitleQuickEditController : ControllerBase
     private ObjectResult Error(int status, string code, string message, int? cueIndex = null, string? currentHash = null, string? clientId = null) =>
         ErrorObject(status, code, message, cueIndex, currentHash, clientId);
 
-    private ObjectResult EditError(SrtEditException ex) => ex.Error switch
+    private ObjectResult EditError(SubtitleEditException ex) => ex.Error switch
     {
-        SrtEditError.InvalidEdit => Error(StatusCodes.Status400BadRequest, "InvalidEdit", ex.Message, ex.CuePosition, clientId: ex.ClientId),
-        SrtEditError.CueNotFound => Error(StatusCodes.Status400BadRequest, "CueNotFound", ex.Message, ex.CuePosition),
-        SrtEditError.TextMismatch => Error(StatusCodes.Status409Conflict, "TextMismatch", ex.Message, ex.CuePosition),
-        SrtEditError.Unrepresentable => Error(StatusCodes.Status422UnprocessableEntity, "Unrepresentable", ex.Message, ex.CuePosition),
+        SubtitleEditError.InvalidEdit => Error(StatusCodes.Status400BadRequest, "InvalidEdit", ex.Message, ex.CuePosition, clientId: ex.ClientId),
+        SubtitleEditError.CueNotFound => Error(StatusCodes.Status400BadRequest, "CueNotFound", ex.Message, ex.CuePosition),
+        SubtitleEditError.TextMismatch => Error(StatusCodes.Status409Conflict, "TextMismatch", ex.Message, ex.CuePosition),
+        SubtitleEditError.Unrepresentable => Error(StatusCodes.Status422UnprocessableEntity, "Unrepresentable", ex.Message, ex.CuePosition),
         _ => Error(StatusCodes.Status500InternalServerError, "VerificationFailed", ex.Message, ex.CuePosition),
     };
 

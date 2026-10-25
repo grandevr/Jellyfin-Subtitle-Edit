@@ -5,7 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
-using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Storage;
 
@@ -96,7 +96,7 @@ public sealed class SafeFileWriter
             }
 
             byte[] content = newContent.ToArray();
-            string newHash = SrtDocument.ComputeHash(content);
+            string newHash = SubtitleHash.Compute(content);
             FileOwnership? original = metadata.Get(full);
             string temp = WriterPath(full, newHash, TempExtension);
 
@@ -187,7 +187,7 @@ public sealed class SafeFileWriter
     private static SubtitleWriteException Conflict(string currentHash) =>
         new(SubtitleWriteError.Conflict, "The subtitle file changed on disk since it was loaded.", currentHash: currentHash);
 
-    private static string HashOf(byte[] content) => SrtDocument.ComputeHash(content);
+    private static string HashOf(byte[] content) => SubtitleHash.Compute(content);
 
     private static byte[] ReadTarget(string full)
     {

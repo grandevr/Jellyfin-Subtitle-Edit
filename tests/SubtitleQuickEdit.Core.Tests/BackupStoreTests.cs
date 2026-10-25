@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using SubtitleQuickEdit.Core.Storage;
+using SubtitleQuickEdit.Core.Subtitles;
 using Xunit;
 
 namespace SubtitleQuickEdit.Core.Tests;
@@ -26,6 +27,30 @@ public class BackupStoreTests
         Assert.Matches(new Regex("^" + Item + @"_4_[0-9a-f]{8}_\d{8}T\d{9}Z_original\.srt$"), Path.GetFileName(path));
         Assert.Equal(folder, Path.GetDirectoryName(path));
         Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Theory]
+    [InlineData("/media/movie.en.vtt", ".vtt")]
+    [InlineData("/media/movie.en.ASS", ".ass")]
+    [InlineData("/media/movie.en.ssa", ".ssa")]
+    public void Backups_keep_the_subtitles_own_extension_and_are_found_by_hash(string subtitle, string extension)
+    {
+        using var dir = new TempDir();
+        string folder = Path.Combine(dir.Root, "bk");
+        var store = new BackupStore(folder, BackupMode.OriginalPlusLastN, 3);
+        byte[] v1 = Content.Srt("v1");
+        byte[] v2 = Content.Srt("v2");
+        byte[] restore = Content.Srt("r");
+
+        string original = store.BeforeSave(Item, 2, subtitle, v1).Single();
+        string save = store.BeforeSave(Item, 2, subtitle, v2).Single();
+        string point = store.KeepRestorePoint(Item, 2, subtitle, restore);
+
+        Assert.EndsWith("_original" + extension, original, StringComparison.Ordinal);
+        Assert.EndsWith("_save" + extension, save, StringComparison.Ordinal);
+        Assert.EndsWith("_restore" + extension, point, StringComparison.Ordinal);
+        Assert.Equal(v1, store.FindByHash(Item, 2, subtitle, Content.Hash(v1)));
+        Assert.Equal(restore, store.FindByHash(Item, 2, subtitle, Content.Hash(restore)));
     }
 
     [Fact]

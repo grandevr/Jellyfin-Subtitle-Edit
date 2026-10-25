@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Editing;
 
@@ -18,6 +18,6 @@ public sealed record SaveRequest(
     int StreamIndex,
     string Path,
     string BaseHash,
-    IReadOnlyList<SrtEdit> Edits,
+    IReadOnlyList<SubtitleEdit> Edits,
     long? RuntimeMs,
     bool KeepRestorePoint = false);

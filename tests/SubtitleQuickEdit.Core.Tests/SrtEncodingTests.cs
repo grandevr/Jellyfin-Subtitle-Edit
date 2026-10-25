@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Text;
 using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 using UtfUnknown;
 using Xunit;
 
@@ -12,7 +13,7 @@ public class SrtEncodingTests
     [Fact]
     public void Utf8_bom_is_detected_with_its_length()
     {
-        SrtEncoding? enc = SrtEncoding.Detect(Fixtures.Utf8("1\n00:00:01,000 --> 00:00:02,000\nHi\n", bom: true));
+        SubtitleEncoding? enc = SubtitleEncoding.Detect(Fixtures.Utf8("1\n00:00:01,000 --> 00:00:02,000\nHi\n", bom: true));
 
         Assert.NotNull(enc);
         Assert.Equal("utf-8", enc.Name);
@@ -22,8 +23,8 @@ public class SrtEncodingTests
     [Fact]
     public void Utf16_boms_pick_the_byte_order()
     {
-        SrtEncoding? le = SrtEncoding.Detect(Fixtures.Utf16Le("1\n00:00:01,000 --> 00:00:02,000\nHi\n"));
-        SrtEncoding? be = SrtEncoding.Detect(Fixtures.Utf16Be("1\n00:00:01,000 --> 00:00:02,000\nHi\n"));
+        SubtitleEncoding? le = SubtitleEncoding.Detect(Fixtures.Utf16Le("1\n00:00:01,000 --> 00:00:02,000\nHi\n"));
+        SubtitleEncoding? be = SubtitleEncoding.Detect(Fixtures.Utf16Be("1\n00:00:01,000 --> 00:00:02,000\nHi\n"));
 
         Assert.Equal("utf-16le", le?.Name);
         Assert.Equal("utf-16be", be?.Name);
@@ -34,7 +35,7 @@ public class SrtEncodingTests
     [Fact]
     public void Ascii_is_treated_as_utf8_like_jellyfin_does()
     {
-        SrtEncoding? enc = SrtEncoding.Detect(Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.English))));
+        SubtitleEncoding? enc = SubtitleEncoding.Detect(Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.English))));
 
         Assert.Equal("utf-8", enc?.Name);
         Assert.Equal(0, enc?.BomLength);
@@ -48,7 +49,7 @@ public class SrtEncodingTests
         string[] texts = polish ? Fixtures.Polish : Fixtures.Czech;
         byte[] data = Fixtures.Windows1250(Fixtures.Render(Fixtures.Cues(texts)));
 
-        SrtEncoding? enc = SrtEncoding.Detect(data);
+        SubtitleEncoding? enc = SubtitleEncoding.Detect(data);
 
         Assert.NotNull(enc);
         Assert.Equal(Fixtures.Render(Fixtures.Cues(texts)), enc.Encoding.GetString(data));
@@ -61,7 +62,7 @@ public class SrtEncodingTests
     {
         byte[] data = Fixtures.Windows1250(Fixtures.Render(Fixtures.Cues(polish ? Fixtures.Polish : Fixtures.Czech)));
 
-        SrtEncoding? ours = SrtEncoding.Detect(data);
+        SubtitleEncoding? ours = SubtitleEncoding.Detect(data);
         DetectionDetail? jellyfin = CharsetDetector.DetectFromBytes(data).Detected;
 
         Assert.NotNull(ours);
@@ -72,7 +73,7 @@ public class SrtEncodingTests
     [Fact]
     public void The_strict_encoding_throws_instead_of_substituting()
     {
-        SrtEncoding enc = SrtEncoding.Detect(Fixtures.Windows1250(Fixtures.Render(Fixtures.Cues(Fixtures.Polish))))!;
+        SubtitleEncoding enc = SubtitleEncoding.Detect(Fixtures.Windows1250(Fixtures.Render(Fixtures.Cues(Fixtures.Polish))))!;
 
         Assert.Throws<EncoderFallbackException>(() => enc.Encoding.GetBytes("Привет"));
     }
@@ -83,8 +84,8 @@ public class SrtEncodingTests
         byte[] le = { 0xFF, 0xFE, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00 };
         byte[] be = { 0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x41 };
 
-        Assert.Null(SrtEncoding.Detect(le));
-        Assert.Null(SrtEncoding.Detect(be));
+        Assert.Null(SubtitleEncoding.Detect(le));
+        Assert.Null(SubtitleEncoding.Detect(be));
     }
 
     [Fact]
@@ -102,7 +103,7 @@ public class SrtEncodingTests
         byte[] data = Fixtures.Windows1250(Fixtures.Render(Fixtures.Cues(Fixtures.Polish)));
         byte[] copy = data.ToArray();
 
-        _ = SrtEncoding.Detect(data);
+        _ = SubtitleEncoding.Detect(data);
 
         Assert.Equal(copy, data);
     }

@@ -1,25 +1,27 @@
 using System;
 using System.IO;
 using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Editing;
 
 /// <summary>
 /// Reads a subtitle file and says whether it can be edited.
 /// </summary>
-public static class SrtTrackInspector
+public static class SubtitleTrackInspector
 {
     /// <summary>
-    /// Reads and parses a subtitle file.
+    /// Reads and parses a subtitle file with the parser for its format.
     /// </summary>
     /// <param name="path">The subtitle file.</param>
     /// <returns>The parsed file, or the reason it is not editable.</returns>
     public static TrackInspection Inspect(string path)
     {
         ArgumentNullException.ThrowIfNull(path);
-        if (!path.EndsWith(".srt", StringComparison.OrdinalIgnoreCase))
+        SubtitleFormat? format = SubtitleFormats.FromPath(path);
+        if (format is not SubtitleFormat known || !SubtitleFormats.IsEditable(known))
         {
-            return new TrackInspection(null, "Only SubRip (.srt) subtitles can be edited.");
+            return new TrackInspection(null, SubtitleFormats.UnsupportedMessage);
         }
 
         byte[] data;
@@ -31,7 +33,7 @@ public static class SrtTrackInspector
                 return new TrackInspection(null, "The subtitle file does not exist.");
             }
 
-            if (info.Length > SrtDocument.MaxFileBytes)
+            if (info.Length > SubtitleLimits.MaxFileBytes)
             {
                 return new TrackInspection(null, "The file is too large to edit.");
             }
@@ -47,7 +49,18 @@ public static class SrtTrackInspector
             return new TrackInspection(null, "The subtitle file could not be read: " + ex.Message);
         }
 
-        SrtParseResult parsed = SrtDocument.Parse(data);
-        return new TrackInspection(parsed.Document, parsed.FailureReason);
+        return Parse(known, data);
+    }
+
+    private static TrackInspection Parse(SubtitleFormat format, byte[] data)
+    {
+        switch (format)
+        {
+            case SubtitleFormat.Srt:
+                SrtParseResult srt = SrtDocument.Parse(data);
+                return new TrackInspection(srt.Document, srt.FailureReason);
+            default:
+                return new TrackInspection(null, SubtitleFormats.UnsupportedMessage);
+        }
     }
 }

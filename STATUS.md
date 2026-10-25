@@ -1,8 +1,9 @@
-# Subtitle Quick Edit: status (stage 3 done, 2026-10-24; waiting on the hand test)
+# Subtitle Quick Edit: status (1.0 live since 2026-10-25; stage 5 = 1.1 in progress)
 
 Spec: the "Jellyfin Subtitle Quick-Edit Plugin — Spec" doc (claude.ai artifact YP25tXFeL6JFKs3i32VdNx). Read it again
-before resuming: it is the source of truth and was updated after every stage. Nothing has been installed on the live
-Jellyfin or touched on the live Bazarr. All work is on a throwaway Jellyfin on the test host.
+before resuming: it is the source of truth and was updated after every stage. 1.0 (stages 0 to 4, main ff112ca) runs
+on the live Jellyfin since 2026-10-25; the live Bazarr was never touched. Development and testing happen on a throwaway
+Jellyfin on the test host.
 
 ## State now
 
@@ -12,7 +13,7 @@ Jellyfin or touched on the live Bazarr. All work is on a throwaway Jellyfin on t
   tests against the test server (`testdata/browser/stage3_tests.py`): 42 of 42 at stage 3f, plus the 3g phone checks.
 - The test subtitles are pristine after every browser run (TestWebm 01 restored through the API; TestWebm 03's `.en.srt`
   by `testdata/reset_webm03_srt.sh`).
-- Plugin version is still 0.2.0.0; it is bumped at packaging (stage 6).
+- Plugin version is 1.1.0.0 from stage 5a (2026-10-25); 1.0 was built as 0.2.0.0. Remove the old `SubtitleQuickEdit_0.2.0.0` folder when installing.
 
 ## Done
 
@@ -64,9 +65,11 @@ Jellyfin or touched on the live Bazarr. All work is on a throwaway Jellyfin on t
 
 ## Next
 
-1. **Hand test** (required): a desktop browser against the test server, then the Android app's web player (best effort).
-2. Remove the Playwright image from the test host once stage 3 is accepted (it can be rebuilt for stage 4).
-3. Stage 4: submissions and review for non-admins. Stage 6: acceptance, packaging, deployment (only with approval).
+Plan approved 2026-10-25 (the plan doc "Subtitle Quick Edit 1.1: VTT, ASS and embedded extract"):
+1. Stage 5 = 1.1: 5a version 1.1.0.0 and the format-neutral core (`Subtitles/`); 5b WebVTT; 5c ASS/SSA; 5d API, player,
+   "Show style tags" toggle, Reload check for VTT and ASS; 5e release (live update only with approval).
+2. Stage 6 = 1.2: extract embedded text tracks to a file next to the video, released separately.
+3. Keep the Playwright image on the test host until the user says the whole project is finished.
 
 ## Open decisions
 
@@ -115,7 +118,7 @@ Run `. devtools/env.sh` first (with the settings from `local.env`) so that `sqe_
 - Clean rebuild: `devtools/dotnet.sh build -c Release --no-incremental`
 - Re-arm the foreign-group fixture: `devtools/prepare_mismatch.sh`
 - Unit tests (all integration tests required): `DOCKER_FLAGS="-v $SQE_TEST_ROOT/src/mismatch:/mismatch -v $SQE_TEST_ROOT/media:/fixtures:ro -e SQE_MISMATCH_FILE=/mismatch/file.srt -e SQE_FIXTURE_DIR=/fixtures -e SQE_REQUIRE_INTEGRATION=1" devtools/dotnet.sh test -c Release --no-build`
-- Install the plugin on the TEST server: `DOCKER_FLAGS="-v $SQE_TEST_ROOT/config/data/plugins:/plugins" devtools/dotnet.sh build src/Jellyfin.Plugin.SubtitleQuickEdit -c Release --no-incremental -o /plugins/SubtitleQuickEdit_0.2.0.0`
+- Install the plugin on the TEST server: `DOCKER_FLAGS="-v $SQE_TEST_ROOT/config/data/plugins:/plugins" devtools/dotnet.sh build src/Jellyfin.Plugin.SubtitleQuickEdit -c Release --no-incremental -o /plugins/SubtitleQuickEdit_1.1.0.0` (first `rm -rf $SQE_TEST_ROOT/config/data/plugins/SubtitleQuickEdit_0.2.0.0`)
 - Restart the test server to load it: `sqe_host docker restart jellyfin-test`
 - API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>`
 - Mutation check (about 8 minutes): `python3 -I devtools/mutation_check.py` (needs `$SQE_TEST_ROOT/src/sqe-mut`, created with `sqe_host mkdir $SQE_TEST_ROOT/src/sqe-mut` and `sqe_host chown 1000:1000 $SQE_TEST_ROOT/src/sqe-mut`)

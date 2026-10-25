@@ -3,6 +3,7 @@ using System.IO;
 using SubtitleQuickEdit.Core.Editing;
 using SubtitleQuickEdit.Core.Srt;
 using SubtitleQuickEdit.Core.Storage;
+using SubtitleQuickEdit.Core.Subtitles;
 using Xunit;
 
 namespace SubtitleQuickEdit.Core.Tests;
@@ -15,7 +16,7 @@ public class SrtTrackInspectorTests
         using var dir = new TempDir();
         string path = dir.Write("movie.en.srt", Content.Srt("x"));
 
-        TrackInspection result = SrtTrackInspector.Inspect(path);
+        TrackInspection result = SubtitleTrackInspector.Inspect(path);
 
         Assert.True(result.Editable);
         Assert.Null(result.Reason);
@@ -32,7 +33,7 @@ public class SrtTrackInspectorTests
         using var dir = new TempDir();
         string path = dir.Write(name, Content.Srt("x"));
 
-        TrackInspection result = SrtTrackInspector.Inspect(path);
+        TrackInspection result = SubtitleTrackInspector.Inspect(path);
 
         Assert.False(result.Editable);
         Assert.Contains("SubRip", result.Reason, StringComparison.Ordinal);
@@ -44,7 +45,7 @@ public class SrtTrackInspectorTests
         using var dir = new TempDir();
         string path = dir.Write("MOVIE.EN.SRT", Content.Srt("x"));
 
-        Assert.True(SrtTrackInspector.Inspect(path).Editable);
+        Assert.True(SubtitleTrackInspector.Inspect(path).Editable);
     }
 
     [Fact]
@@ -52,7 +53,7 @@ public class SrtTrackInspectorTests
     {
         using var dir = new TempDir();
 
-        TrackInspection result = SrtTrackInspector.Inspect(Path.Combine(dir.Root, "nope.srt"));
+        TrackInspection result = SubtitleTrackInspector.Inspect(Path.Combine(dir.Root, "nope.srt"));
 
         Assert.False(result.Editable);
         Assert.Contains("does not exist", result.Reason, StringComparison.Ordinal);
@@ -64,7 +65,7 @@ public class SrtTrackInspectorTests
         using var dir = new TempDir();
         string path = dir.Write("movie.en.srt", Fixtures.Utf8("this is not a subtitle file\n"));
 
-        TrackInspection result = SrtTrackInspector.Inspect(path);
+        TrackInspection result = SubtitleTrackInspector.Inspect(path);
 
         Assert.False(result.Editable);
         Assert.Contains("outside any cue", result.Reason, StringComparison.Ordinal);
@@ -82,7 +83,7 @@ public class SrtTrackInspectorTests
         using var dir = new TempDir();
         string path = dir.Write("movie.en.srt", Content.Srt("x"), UnixFileMode.UserWrite);
 
-        TrackInspection result = SrtTrackInspector.Inspect(path);
+        TrackInspection result = SubtitleTrackInspector.Inspect(path);
 
         Assert.False(result.Editable);
         Assert.Contains("cannot read", result.Reason, StringComparison.Ordinal);
@@ -95,10 +96,10 @@ public class SrtTrackInspectorTests
         string path = Path.Combine(dir.Root, "huge.srt");
         using (var stream = new FileStream(path, FileMode.Create))
         {
-            stream.SetLength(SrtDocument.MaxFileBytes + 1);
+            stream.SetLength(SubtitleLimits.MaxFileBytes + 1);
         }
 
-        TrackInspection result = SrtTrackInspector.Inspect(path);
+        TrackInspection result = SubtitleTrackInspector.Inspect(path);
 
         Assert.False(result.Editable);
         Assert.Contains("too large", result.Reason, StringComparison.Ordinal);

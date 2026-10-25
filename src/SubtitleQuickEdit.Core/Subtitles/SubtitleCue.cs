@@ -1,9 +1,9 @@
-namespace SubtitleQuickEdit.Core.Srt;
+namespace SubtitleQuickEdit.Core.Subtitles;
 
 /// <summary>
-/// One cue of a parsed .srt file.
+/// One cue of a parsed subtitle file.
 /// </summary>
-public sealed class SrtCue
+public sealed class SubtitleCue
 {
     /// <summary>
     /// Gets the 1-based position of the cue in the file. This is what edits refer to.

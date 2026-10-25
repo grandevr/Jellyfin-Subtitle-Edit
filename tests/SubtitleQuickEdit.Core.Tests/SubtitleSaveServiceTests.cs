@@ -5,6 +5,7 @@ using System.Linq;
 using SubtitleQuickEdit.Core.Editing;
 using SubtitleQuickEdit.Core.Srt;
 using SubtitleQuickEdit.Core.Storage;
+using SubtitleQuickEdit.Core.Subtitles;
 using Xunit;
 
 namespace SubtitleQuickEdit.Core.Tests;
@@ -29,7 +30,7 @@ public class SubtitleSaveServiceTests
         return path;
     }
 
-    private static SaveRequest Request(string path, byte[] baseContent, params SrtEdit[] edits) =>
+    private static SaveRequest Request(string path, byte[] baseContent, params SubtitleEdit[] edits) =>
         new(Item, 4, path, Content.Hash(baseContent), edits, 600_000);
 
     private static int BackupCount(TempDir dir) =>
@@ -44,7 +45,7 @@ public class SubtitleSaveServiceTests
         SrtDocument doc = SrtDocument.Parse(original).Document!;
 
         SaveResult result = Service(dir).Save(
-            Request(path, original, new SrtTextEdit(3, doc.Cues[2].Text, "Nowa kwestia: żółć."), new SrtAddCue("a1", 100, 900, "Na początku")));
+            Request(path, original, new SubtitleTextEdit(3, doc.Cues[2].Text, "Nowa kwestia: żółć."), new SubtitleAddCue("a1", 100, 900, "Na początku")));
 
         byte[] onDisk = File.ReadAllBytes(path);
         Assert.Equal(result.Hash, Content.Hash(onDisk));
@@ -67,11 +68,11 @@ public class SubtitleSaveServiceTests
         string path = Subtitle(dir, original);
         SubtitleSaveService service = Service(dir);
         SrtDocument doc = SrtDocument.Parse(original).Document!;
-        SaveResult first = service.Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "Pierwsza")));
+        SaveResult first = service.Save(Request(path, original, new SubtitleTextEdit(1, doc.Cues[0].Text, "Pierwsza")));
         byte[] afterFirst = File.ReadAllBytes(path);
 
         SaveResult second = service.Save(
-            new SaveRequest(Item, 4, path, first.Hash, new SrtEdit[] { new SrtTextEdit(2, doc.Cues[1].Text, "Druga") }, null));
+            new SaveRequest(Item, 4, path, first.Hash, new SubtitleEdit[] { new SubtitleTextEdit(2, doc.Cues[1].Text, "Druga") }, null));
 
         Assert.NotEqual(first.Hash, second.Hash);
         Assert.Equal(original, File.ReadAllBytes(Assert.Single(Directory.GetFiles(BackupFolder(dir)))));
@@ -86,7 +87,7 @@ public class SubtitleSaveServiceTests
         string path = Subtitle(dir, original);
         SrtDocument doc = SrtDocument.Parse(original).Document!;
         var request = new SaveRequest(
-            Item, 4, path, "  " + Content.Hash(original).ToUpperInvariant() + " ", new SrtEdit[] { new SrtTextEdit(1, doc.Cues[0].Text, "x") }, null);
+            Item, 4, path, "  " + Content.Hash(original).ToUpperInvariant() + " ", new SubtitleEdit[] { new SubtitleTextEdit(1, doc.Cues[0].Text, "x") }, null);
 
         Service(dir).Save(request);
 
@@ -104,7 +105,7 @@ public class SubtitleSaveServiceTests
         SrtDocument doc = SrtDocument.Parse(original).Document!;
 
         SubtitleWriteException ex = Assert.Throws<SubtitleWriteException>(
-            () => Service(dir).Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "x"))));
+            () => Service(dir).Save(Request(path, original, new SubtitleTextEdit(1, doc.Cues[0].Text, "x"))));
 
         Assert.Equal(SubtitleWriteError.Conflict, ex.Error);
         Assert.Equal(Content.Hash(changed), ex.CurrentHash);
@@ -119,10 +120,10 @@ public class SubtitleSaveServiceTests
         byte[] original = Original();
         string path = Subtitle(dir, original);
 
-        SrtEditException ex = Assert.Throws<SrtEditException>(
-            () => Service(dir).Save(Request(path, original, new SrtTextEdit(2, "something else entirely", "x"))));
+        SubtitleEditException ex = Assert.Throws<SubtitleEditException>(
+            () => Service(dir).Save(Request(path, original, new SubtitleTextEdit(2, "something else entirely", "x"))));
 
-        Assert.Equal(SrtEditError.TextMismatch, ex.Error);
+        Assert.Equal(SubtitleEditError.TextMismatch, ex.Error);
         Assert.Equal(2, ex.CuePosition);
         Assert.Equal(original, File.ReadAllBytes(path));
         Assert.Equal(0, BackupCount(dir));
@@ -136,16 +137,16 @@ public class SubtitleSaveServiceTests
         string path = Subtitle(dir, original);
         SubtitleSaveService service = Service(dir);
 
-        Assert.Equal(SrtEditError.InvalidEdit, Assert.Throws<SrtEditException>(() => service.Save(Request(path, original))).Error);
+        Assert.Equal(SubtitleEditError.InvalidEdit, Assert.Throws<SubtitleEditException>(() => service.Save(Request(path, original))).Error);
         Assert.Equal(
-            SrtEditError.InvalidEdit,
-            Assert.Throws<SrtEditException>(() => service.Save(Request(path, original, new SrtAddCue("a", 900, 100, "x")))).Error);
+            SubtitleEditError.InvalidEdit,
+            Assert.Throws<SubtitleEditException>(() => service.Save(Request(path, original, new SubtitleAddCue("a", 900, 100, "x")))).Error);
         Assert.Equal(
-            SrtEditError.Unrepresentable,
-            Assert.Throws<SrtEditException>(() => service.Save(Request(path, original, new SrtAddCue("a", 100, 900, "Привет")))).Error);
+            SubtitleEditError.Unrepresentable,
+            Assert.Throws<SubtitleEditException>(() => service.Save(Request(path, original, new SubtitleAddCue("a", 100, 900, "Привет")))).Error);
         Assert.Equal(
-            SrtEditError.InvalidEdit,
-            Assert.Throws<SrtEditException>(() => service.Save(Request(path, original, new SrtAddCue("a", 599_900, 600_100, "x")))).Error); // past the 600 s runtime
+            SubtitleEditError.InvalidEdit,
+            Assert.Throws<SubtitleEditException>(() => service.Save(Request(path, original, new SubtitleAddCue("a", 599_900, 600_100, "x")))).Error); // past the 600 s runtime
         Assert.Equal(original, File.ReadAllBytes(path));
         Assert.Equal(0, BackupCount(dir));
     }
@@ -158,7 +159,7 @@ public class SubtitleSaveServiceTests
         string missing = Path.Combine(dir.Root, "media", "gone.srt");
         string garbage = Subtitle(dir, Fixtures.Utf8("not a subtitle\n"), "garbage.srt");
         SubtitleSaveService service = Service(dir);
-        SrtEdit edit = new SrtTextEdit(1, "x", "y");
+        SubtitleEdit edit = new SubtitleTextEdit(1, "x", "y");
 
         foreach (string path in new[] { ass, missing, garbage })
         {
@@ -180,7 +181,7 @@ public class SubtitleSaveServiceTests
         SrtDocument doc = SrtDocument.Parse(original).Document!;
 
         SubtitleWriteException ex = Assert.Throws<SubtitleWriteException>(
-            () => Service(dir).Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "x"))));
+            () => Service(dir).Save(Request(path, original, new SubtitleTextEdit(1, doc.Cues[0].Text, "x"))));
 
         Assert.Equal(SubtitleWriteError.Io, ex.Error);
         Assert.Equal(original, File.ReadAllBytes(path));
@@ -204,7 +205,7 @@ public class SubtitleSaveServiceTests
         try
         {
             SubtitleWriteException ex = Assert.Throws<SubtitleWriteException>(
-                () => Service(dir).Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "x"))));
+                () => Service(dir).Save(Request(path, original, new SubtitleTextEdit(1, doc.Cues[0].Text, "x"))));
 
             Assert.Equal(SubtitleWriteError.NotWritable, ex.Error);
             Assert.Contains(media, ex.Message, StringComparison.Ordinal);
@@ -225,7 +226,7 @@ public class SubtitleSaveServiceTests
         string path = Subtitle(dir, original);
         SrtDocument doc = SrtDocument.Parse(original).Document!;
 
-        SaveResult result = Service(dir, new RefusingMetadata()).Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "x")));
+        SaveResult result = Service(dir, new RefusingMetadata()).Save(Request(path, original, new SubtitleTextEdit(1, doc.Cues[0].Text, "x")));
 
         Assert.Equal(WriteMethod.InPlaceCopy, result.Method);
         Assert.Equal(result.Hash, Content.Hash(File.ReadAllBytes(path)));
@@ -242,7 +243,7 @@ public class SubtitleSaveServiceTests
         SrtDocument doc = SrtDocument.Parse(original).Document!;
 
         SubtitleWriteException ex = Assert.Throws<SubtitleWriteException>(
-            () => Service(dir, observer: observer).Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "x"))));
+            () => Service(dir, observer: observer).Save(Request(path, original, new SubtitleTextEdit(1, doc.Cues[0].Text, "x"))));
 
         Assert.Equal(SubtitleWriteError.Conflict, ex.Error);
         Assert.Equal(intruder, File.ReadAllBytes(path));
@@ -266,14 +267,14 @@ public class SubtitleSaveServiceTests
         SrtDocument doc = SrtDocument.Parse(original).Document!;
 
         // An earlier session: the original is backed up.
-        SaveResult earlier = service.Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "Wcześniej")));
+        SaveResult earlier = service.Save(Request(path, original, new SubtitleTextEdit(1, doc.Cues[0].Text, "Wcześniej")));
         byte[] sessionStart = File.ReadAllBytes(path);
 
         // This session: the first save keeps a restore point, then a text edit and an added line.
         SaveResult first = service.Save(
-            new SaveRequest(Item, 4, path, earlier.Hash, new SrtEdit[] { new SrtTextEdit(2, doc.Cues[1].Text, "Teraz") }, 600_000, KeepRestorePoint: true));
+            new SaveRequest(Item, 4, path, earlier.Hash, new SubtitleEdit[] { new SubtitleTextEdit(2, doc.Cues[1].Text, "Teraz") }, 600_000, KeepRestorePoint: true));
         SaveResult second = service.Save(
-            new SaveRequest(Item, 4, path, first.Hash, new SrtEdit[] { new SrtAddCue("n1", 50, 500, "Nowa linia") }, 600_000));
+            new SaveRequest(Item, 4, path, first.Hash, new SubtitleEdit[] { new SubtitleAddCue("n1", 50, 500, "Nowa linia") }, 600_000));
 
         RestoreResult restored = service.Restore(new RestoreRequest(Item, 4, path, second.Hash, Content.Hash(sessionStart)));
 
@@ -290,7 +291,7 @@ public class SubtitleSaveServiceTests
         byte[] original = Original();
         string path = Subtitle(dir, original);
         SrtDocument doc = SrtDocument.Parse(original).Document!;
-        SaveResult saved = Service(dir).Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "x")));
+        SaveResult saved = Service(dir).Save(Request(path, original, new SubtitleTextEdit(1, doc.Cues[0].Text, "x")));
 
         RestoreResult restored = Service(dir).Restore(new RestoreRequest(Item, 4, path, saved.Hash, Content.Hash(original)));
 
@@ -305,7 +306,7 @@ public class SubtitleSaveServiceTests
         byte[] original = Original();
         string path = Subtitle(dir, original);
         SrtDocument doc = SrtDocument.Parse(original).Document!;
-        SaveResult saved = Service(dir).Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "x")));
+        SaveResult saved = Service(dir).Save(Request(path, original, new SubtitleTextEdit(1, doc.Cues[0].Text, "x")));
         byte[] now = File.ReadAllBytes(path);
 
         SubtitleWriteException ex = Assert.Throws<SubtitleWriteException>(
@@ -323,7 +324,7 @@ public class SubtitleSaveServiceTests
         byte[] original = Original();
         string path = Subtitle(dir, original);
         SrtDocument doc = SrtDocument.Parse(original).Document!;
-        SaveResult saved = Service(dir).Save(Request(path, original, new SrtTextEdit(1, doc.Cues[0].Text, "x")));
+        SaveResult saved = Service(dir).Save(Request(path, original, new SubtitleTextEdit(1, doc.Cues[0].Text, "x")));
         byte[] now = File.ReadAllBytes(path);
         int backups = BackupCount(dir);
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 using Xunit;
 
 namespace SubtitleQuickEdit.Core.Tests;
@@ -18,7 +19,7 @@ public class SrtAddTests
         SrtDocument doc = SrtDocument.Parse(fixture.Data).Document!;
         long start = doc.Cues[3].StartMs + 500; // between cue 4 and cue 5
 
-        SrtApplyResult result = doc.Apply(new SrtEdit[] { new SrtAddCue("a1", start, start + 1500, "A new line") });
+        SubtitleApplyResult result = doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("a1", start, start + 1500, "A new line") });
 
         SrtDocument after = SrtDocument.Parse(result.Content.ToArray()).Document!;
         Assert.Equal(doc.Cues.Count + 1, after.Cues.Count);
@@ -38,7 +39,7 @@ public class SrtAddTests
         byte[] data = Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.German), "\r\n"), bom: true);
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        byte[] after = doc.Apply(new SrtEdit[] { new SrtAddCue("x", 100, 900, "Vorspann") }).Content.ToArray();
+        byte[] after = doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("x", 100, 900, "Vorspann") }).Content.ToArray();
 
         Assert.Equal(Fixtures.Utf8Bom, after[..3]);
         SrtDocument reparsed = SrtDocument.Parse(after).Document!;
@@ -59,7 +60,7 @@ public class SrtAddTests
         SrtDocument doc = SrtDocument.Parse(data).Document!;
         long start = doc.Cues[^1].EndMs + 1000;
 
-        byte[] after = doc.Apply(new SrtEdit[] { new SrtAddCue("end", start, start + 1000, "The very end") }).Content.ToArray();
+        byte[] after = doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("end", start, start + 1000, "The very end") }).Content.ToArray();
 
         string text = Encoding.UTF8.GetString(after);
         SrtDocument reparsed = SrtDocument.Parse(after).Document!;
@@ -78,7 +79,7 @@ public class SrtAddTests
         SrtDocument doc = SrtDocument.Parse(Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.English)))).Document!;
         long start = doc.Cues[2].StartMs;
 
-        SrtApplyResult result = doc.Apply(new SrtEdit[] { new SrtAddCue("same", start, start + 500, "Twin") });
+        SubtitleApplyResult result = doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("same", start, start + 500, "Twin") });
 
         SrtDocument after = SrtDocument.Parse(result.Content.ToArray()).Document!;
         Assert.Equal(doc.Cues[2].Text, after.Cues[2].Text);
@@ -92,13 +93,13 @@ public class SrtAddTests
         SrtDocument doc = SrtDocument.Parse(Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.English)))).Document!;
         long gap = doc.Cues[1].EndMs + 200; // after cue 2, before cue 3
 
-        SrtApplyResult result = doc.Apply(
-            new SrtEdit[]
+        SubtitleApplyResult result = doc.Apply(
+            new SubtitleEdit[]
             {
-                new SrtAddCue("late", gap + 600, gap + 900, "Second of the pair"),
-                new SrtAddCue("first", 50, 400, "Before everything"),
-                new SrtAddCue("early", gap, gap + 400, "First of the pair"),
-                new SrtAddCue("last", 999_000, 1_000_000, "After everything"),
+                new SubtitleAddCue("late", gap + 600, gap + 900, "Second of the pair"),
+                new SubtitleAddCue("first", 50, 400, "Before everything"),
+                new SubtitleAddCue("early", gap, gap + 400, "First of the pair"),
+                new SubtitleAddCue("last", 999_000, 1_000_000, "After everything"),
             });
 
         SrtDocument after = SrtDocument.Parse(result.Content.ToArray()).Document!;
@@ -124,7 +125,7 @@ public class SrtAddTests
         SrtDocument doc = SrtDocument.Parse(data).Document!;
         long start = doc.Cues[1].StartMs + 100;
 
-        SrtApplyResult result = doc.Apply(new SrtEdit[] { new SrtAddCue("m", start, start + 1000, "Inserted") });
+        SubtitleApplyResult result = doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("m", start, start + 1000, "Inserted") });
 
         SrtDocument after = SrtDocument.Parse(result.Content.ToArray()).Document!;
         Assert.Equal(13, after.Cues.Count);
@@ -141,7 +142,7 @@ public class SrtAddTests
         byte[] data = Fixtures.Windows1250(Fixtures.Render(Fixtures.Cues(Fixtures.Polish), "\r\n"));
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        byte[] after = doc.Apply(new SrtEdit[] { new SrtAddCue("p", 1, 1500, "Źdźbło łączy żółć") }).Content.ToArray();
+        byte[] after = doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("p", 1, 1500, "Źdźbło łączy żółć") }).Content.ToArray();
 
         Assert.Equal("Źdźbło łączy żółć", SrtDocument.Parse(after).Document!.Cues[0].Text);
         Assert.True(after.AsSpan().IndexOf(Fixtures.Cp1250.GetBytes("Źdźbło łączy żółć\r\n")) >= 0);
@@ -153,7 +154,7 @@ public class SrtAddTests
         byte[] data = Fixtures.Utf16Be(Fixtures.Render(Fixtures.Cues(Fixtures.German)));
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        byte[] after = doc.Apply(new SrtEdit[] { new SrtAddCue("u", 60_000, 61_000, "Zeile\nzwei") }).Content.ToArray();
+        byte[] after = doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("u", 60_000, 61_000, "Zeile\nzwei") }).Content.ToArray();
 
         Assert.Equal(Fixtures.Utf16BeBom, after[..2]);
         SrtDocument reparsed = SrtDocument.Parse(after).Document!;
@@ -167,7 +168,7 @@ public class SrtAddTests
         string text = "1\n00:00:10,000 --> 00:00:11,000\nA\n\n2\n00:00:02,000 --> 00:00:03,000\nB\n\n3\n00:00:20,000 --> 00:00:21,000\nC\n";
         SrtDocument doc = SrtDocument.Parse(Fixtures.Utf8(text)).Document!;
 
-        SrtApplyResult result = doc.Apply(new SrtEdit[] { new SrtAddCue("n", 5000, 6000, "N") });
+        SubtitleApplyResult result = doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("n", 5000, 6000, "N") });
 
         SrtDocument after = SrtDocument.Parse(result.Content.ToArray()).Document!;
         Assert.Equal(new[] { "N", "A", "B", "C" }, after.Cues.Select(c => c.Text).ToArray());
@@ -179,11 +180,11 @@ public class SrtAddTests
     {
         SrtDocument doc = SrtDocument.Parse(Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.English)))).Document!;
 
-        SrtApplyResult result = doc.Apply(
-            new SrtEdit[]
+        SubtitleApplyResult result = doc.Apply(
+            new SubtitleEdit[]
             {
-                new SrtTextEdit(3, doc.Cues[2].Text, "Third, edited"),
-                new SrtAddCue("a", 100, 800, "Opening"),
+                new SubtitleTextEdit(3, doc.Cues[2].Text, "Third, edited"),
+                new SubtitleAddCue("a", 100, 800, "Opening"),
             });
 
         SrtDocument after = SrtDocument.Parse(result.Content.ToArray()).Document!;
@@ -199,10 +200,10 @@ public class SrtAddTests
         byte[] data = Fixtures.Windows1250(Fixtures.Render(Fixtures.Cues(Fixtures.Czech)));
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        SrtEditException ex = Assert.Throws<SrtEditException>(
-            () => doc.Apply(new SrtEdit[] { new SrtAddCue("c", 100, 900, "Привет") }));
+        SubtitleEditException ex = Assert.Throws<SubtitleEditException>(
+            () => doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("c", 100, 900, "Привет") }));
 
-        Assert.Equal(SrtEditError.Unrepresentable, ex.Error);
+        Assert.Equal(SubtitleEditError.Unrepresentable, ex.Error);
     }
 
     [Fact]
@@ -211,7 +212,7 @@ public class SrtAddTests
         byte[] data = Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.German), "\r\n"), bom: true);
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        byte[] after = doc.Apply(new SrtEdit[] { new SrtAddCue("t", 22_000, 23_000, "Mitte") }).Content.ToArray();
+        byte[] after = doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("t", 22_000, 23_000, "Mitte") }).Content.ToArray();
 
         // Strip the added block and renumbering: every original time line and text line must still be there, in order.
         string original = Encoding.UTF8.GetString(data, 3, data.Length - 3);
@@ -226,15 +227,15 @@ public class SrtAddTests
 
     private static void AssertOriginalCuesUnchanged(SrtDocument before, SrtDocument after, int[] skipPositions)
     {
-        var originals = new Queue<SrtCue>(before.Cues);
-        foreach (SrtCue cue in after.Cues)
+        var originals = new Queue<SubtitleCue>(before.Cues);
+        foreach (SubtitleCue cue in after.Cues)
         {
             if (skipPositions.Contains(cue.Position))
             {
                 continue;
             }
 
-            SrtCue original = originals.Dequeue();
+            SubtitleCue original = originals.Dequeue();
             Assert.Equal(original.Text, cue.Text);
             Assert.Equal(original.StartMs, cue.StartMs);
             Assert.Equal(original.EndMs, cue.EndMs);

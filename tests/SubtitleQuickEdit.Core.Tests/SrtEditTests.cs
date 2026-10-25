@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 using Xunit;
 
 namespace SubtitleQuickEdit.Core.Tests;
@@ -18,9 +19,9 @@ public class SrtEditTests
         SrtDocument doc = SrtDocument.Parse(fixture.Data).Document!;
         foreach (int pos in new[] { 1, doc.Cues.Count / 2, doc.Cues.Count })
         {
-            SrtCue cue = doc.Cues[pos - 1];
+            SubtitleCue cue = doc.Cues[pos - 1];
 
-            SrtApplyResult result = doc.Apply(new SrtEdit[] { new SrtTextEdit(pos, cue.Text, "Edited line.") });
+            SubtitleApplyResult result = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(pos, cue.Text, "Edited line.") });
 
             AssertOnlyTextRegionChanged(doc, cue, fixture.Data, result.Content.ToArray());
             SrtDocument after = SrtDocument.Parse(result.Content.ToArray()).Document!;
@@ -37,7 +38,7 @@ public class SrtEditTests
 
             Assert.Equal(new[] { pos }, result.EditedCuePositions);
             Assert.Empty(result.AddedCuePositions);
-            Assert.Equal(SrtDocument.ComputeHash(result.Content.ToArray()), result.Hash);
+            Assert.Equal(SubtitleHash.Compute(result.Content.ToArray()), result.Hash);
         }
     }
 
@@ -47,7 +48,7 @@ public class SrtEditTests
         byte[] data = Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.English), "\r\n"));
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        SrtApplyResult result = doc.Apply(new SrtEdit[] { new SrtTextEdit(1, "Hello there.", "First\nSecond") });
+        SubtitleApplyResult result = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(1, "Hello there.", "First\nSecond") });
 
         string text = Encoding.UTF8.GetString(result.Content.Span);
         Assert.Contains("First\r\nSecond", text, StringComparison.Ordinal);
@@ -62,7 +63,7 @@ public class SrtEditTests
             byte[] data = Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.English), eol));
             SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-            SrtApplyResult result = doc.Apply(new SrtEdit[] { new SrtTextEdit(1, "Hello there.", "First\nSecond") });
+            SubtitleApplyResult result = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(1, "Hello there.", "First\nSecond") });
 
             Assert.Contains("First" + eol + "Second", Encoding.UTF8.GetString(result.Content.Span), StringComparison.Ordinal);
         }
@@ -76,9 +77,9 @@ public class SrtEditTests
         string old = doc.Cues[5].Text;
         Assert.Contains("\n", old, StringComparison.Ordinal);
 
-        byte[] oneLine = doc.Apply(new SrtEdit[] { new SrtTextEdit(6, old, "Single line now.") }).Content.ToArray();
+        byte[] oneLine = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(6, old, "Single line now.") }).Content.ToArray();
         SrtDocument doc2 = SrtDocument.Parse(oneLine).Document!;
-        byte[] back = doc2.Apply(new SrtEdit[] { new SrtTextEdit(6, "Single line now.", old) }).Content.ToArray();
+        byte[] back = doc2.Apply(new SubtitleEdit[] { new SubtitleTextEdit(6, "Single line now.", old) }).Content.ToArray();
 
         Assert.Equal(data, back);
     }
@@ -90,7 +91,7 @@ public class SrtEditTests
         SrtDocument doc = SrtDocument.Parse(data).Document!;
         const string NewText = "Źdźbło łączy żółć, gęś i jaźń.";
 
-        SrtApplyResult result = doc.Apply(new SrtEdit[] { new SrtTextEdit(3, doc.Cues[2].Text, NewText) });
+        SubtitleApplyResult result = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(3, doc.Cues[2].Text, NewText) });
 
         byte[] after = result.Content.ToArray();
         byte[] expected = Fixtures.Cp1250.GetBytes(NewText);
@@ -110,10 +111,10 @@ public class SrtEditTests
         SrtDocument doc = SrtDocument.Parse(data).Document!;
         string encodingName = doc.Encoding.Name;
 
-        SrtEditException ex = Assert.Throws<SrtEditException>(
-            () => doc.Apply(new SrtEdit[] { new SrtTextEdit(2, doc.Cues[1].Text, text) }));
+        SubtitleEditException ex = Assert.Throws<SubtitleEditException>(
+            () => doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(2, doc.Cues[1].Text, text) }));
 
-        Assert.Equal(SrtEditError.Unrepresentable, ex.Error);
+        Assert.Equal(SubtitleEditError.Unrepresentable, ex.Error);
         Assert.Equal(2, ex.CuePosition);
         Assert.Contains(encodingName, ex.Message, StringComparison.Ordinal);
     }
@@ -125,7 +126,7 @@ public class SrtEditTests
         SrtDocument doc = SrtDocument.Parse(data).Document!;
         Assert.Equal("utf-8", doc.Encoding.Name);
 
-        byte[] after = doc.Apply(new SrtEdit[] { new SrtTextEdit(1, "Hello there.", "Café — naïve") }).Content.ToArray();
+        byte[] after = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(1, "Hello there.", "Café — naïve") }).Content.ToArray();
 
         SrtDocument reparsed = SrtDocument.Parse(after).Document!;
         Assert.Equal("utf-8", reparsed.Encoding.Name);
@@ -138,7 +139,7 @@ public class SrtEditTests
         byte[] data = Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.German)), bom: true);
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        byte[] after = doc.Apply(new SrtEdit[] { new SrtTextEdit(1, doc.Cues[0].Text, "Hi \U0001F600") }).Content.ToArray();
+        byte[] after = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(1, doc.Cues[0].Text, "Hi \U0001F600") }).Content.ToArray();
 
         Assert.Equal("Hi \U0001F600", SrtDocument.Parse(after).Document!.Cues[0].Text);
         Assert.Equal(Fixtures.Utf8Bom, after[..3]);
@@ -150,7 +151,7 @@ public class SrtEditTests
         byte[] data = Fixtures.Utf16Le(Fixtures.Render(Fixtures.Cues(Fixtures.German), "\r\n"));
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        byte[] after = doc.Apply(new SrtEdit[] { new SrtTextEdit(2, doc.Cues[1].Text, "Zwei\nZeilen")  }).Content.ToArray();
+        byte[] after = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(2, doc.Cues[1].Text, "Zwei\nZeilen")  }).Content.ToArray();
 
         Assert.Equal(Fixtures.Utf16LeBom, after[..2]);
         SrtDocument reparsed = SrtDocument.Parse(after).Document!;
@@ -165,7 +166,7 @@ public class SrtEditTests
         string text = "1\n00:00:01,000 --> 00:00:02,000\n\n2\n00:00:03,000 --> 00:00:04,000\nB\n";
         SrtDocument doc = SrtDocument.Parse(Fixtures.Utf8(text)).Document!;
 
-        byte[] after = doc.Apply(new SrtEdit[] { new SrtTextEdit(1, string.Empty, "Now it speaks") }).Content.ToArray();
+        byte[] after = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(1, string.Empty, "Now it speaks") }).Content.ToArray();
 
         Assert.Equal(
             "1\n00:00:01,000 --> 00:00:02,000\nNow it speaks\n\n2\n00:00:03,000 --> 00:00:04,000\nB\n",
@@ -177,7 +178,7 @@ public class SrtEditTests
     {
         SrtDocument doc = SrtDocument.Parse(Fixtures.Utf8("1\n00:00:01,000 --> 00:00:02,000")).Document!;
 
-        byte[] after = doc.Apply(new SrtEdit[] { new SrtTextEdit(1, string.Empty, "Late text") }).Content.ToArray();
+        byte[] after = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(1, string.Empty, "Late text") }).Content.ToArray();
 
         Assert.Equal("1\n00:00:01,000 --> 00:00:02,000\nLate text", Encoding.UTF8.GetString(after));
     }
@@ -188,12 +189,12 @@ public class SrtEditTests
         byte[] data = Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.English), "\r\n"));
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        SrtApplyResult result = doc.Apply(
-            new SrtEdit[]
+        SubtitleApplyResult result = doc.Apply(
+            new SubtitleEdit[]
             {
-                new SrtTextEdit(12, doc.Cues[11].Text, "Last, much longer line than before"),
-                new SrtTextEdit(1, doc.Cues[0].Text, "Hi"),
-                new SrtTextEdit(6, doc.Cues[5].Text, "One\nTwo"),
+                new SubtitleTextEdit(12, doc.Cues[11].Text, "Last, much longer line than before"),
+                new SubtitleTextEdit(1, doc.Cues[0].Text, "Hi"),
+                new SubtitleTextEdit(6, doc.Cues[5].Text, "One\nTwo"),
             });
 
         SrtDocument after = SrtDocument.Parse(result.Content.ToArray()).Document!;
@@ -210,8 +211,8 @@ public class SrtEditTests
         byte[] data = Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(Fixtures.English)));
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        SrtApplyResult result = doc.Apply(
-            new SrtEdit[] { new SrtTextEdit(2, "This is a two-line cue\r\nwith a line break.", "Fixed") });
+        SubtitleApplyResult result = doc.Apply(
+            new SubtitleEdit[] { new SubtitleTextEdit(2, "This is a two-line cue\r\nwith a line break.", "Fixed") });
 
         Assert.Equal("Fixed", SrtDocument.Parse(result.Content.ToArray()).Document!.Cues[1].Text);
     }
@@ -222,7 +223,7 @@ public class SrtEditTests
         byte[] data = Fixtures.Malformed();
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        byte[] after = doc.Apply(new SrtEdit[] { new SrtTextEdit(2, doc.Cues[1].Text, "Two\nlines") }).Content.ToArray();
+        byte[] after = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(2, doc.Cues[1].Text, "Two\nlines") }).Content.ToArray();
 
         SrtDocument reparsed = SrtDocument.Parse(after).Document!;
         Assert.Equal(doc.Cues.Count, reparsed.Cues.Count);
@@ -239,10 +240,10 @@ public class SrtEditTests
         SrtDocument doc = SrtDocument.Parse(Fixtures.Malformed()).Document!;
         Assert.Null(doc.Cues[2].Number);
 
-        SrtEditException ex = Assert.Throws<SrtEditException>(
-            () => doc.Apply(new SrtEdit[] { new SrtTextEdit(2, doc.Cues[1].Text, "42") }));
+        SubtitleEditException ex = Assert.Throws<SubtitleEditException>(
+            () => doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(2, doc.Cues[1].Text, "42") }));
 
-        Assert.Equal(SrtEditError.VerificationFailed, ex.Error);
+        Assert.Equal(SubtitleEditError.VerificationFailed, ex.Error);
     }
 
     [Fact]
@@ -252,16 +253,16 @@ public class SrtEditTests
         byte[] copy = (byte[])data.Clone();
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        _ = doc.Apply(new SrtEdit[] { new SrtTextEdit(1, "Hello there.", "Changed") });
+        _ = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(1, "Hello there.", "Changed") });
 
         Assert.Equal(copy, data);
-        Assert.Equal(SrtDocument.ComputeHash(copy), doc.Hash);
+        Assert.Equal(SubtitleHash.Compute(copy), doc.Hash);
     }
 
     /// <summary>
     /// The bytes before and after the edited cue's text region must be identical to the original's.
     /// </summary>
-    private static void AssertOnlyTextRegionChanged(SrtDocument doc, SrtCue cue, byte[] before, byte[] after)
+    private static void AssertOnlyTextRegionChanged(SrtDocument doc, SubtitleCue cue, byte[] before, byte[] after)
     {
         int from = doc.ByteOffset(cue.Layout.TextStart);
         int to = doc.ByteOffset(cue.Layout.TextEnd);

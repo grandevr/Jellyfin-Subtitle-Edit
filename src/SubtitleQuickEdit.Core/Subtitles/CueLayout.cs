@@ -1,4 +1,4 @@
-namespace SubtitleQuickEdit.Core.Srt;
+namespace SubtitleQuickEdit.Core.Subtitles;
 
 /// <summary>
 /// Character offsets of the parts of a cue in the decoded text (after the BOM).

@@ -1,8 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Srt;
 
@@ -10,18 +9,8 @@ namespace SubtitleQuickEdit.Core.Srt;
 /// A parsed .srt file that remembers where every cue sits in the original bytes, so edits can be
 /// spliced in without touching any other byte.
 /// </summary>
-public sealed class SrtDocument
+public sealed class SrtDocument : ISubtitleDocument
 {
-    /// <summary>
-    /// Files larger than this are not editable.
-    /// </summary>
-    public const int MaxFileBytes = 8 * 1024 * 1024;
-
-    /// <summary>
-    /// The shortest cue the editor accepts, in milliseconds.
-    /// </summary>
-    public const long MinCueDurationMs = 100;
-
     /// <summary>
     /// The largest time an .srt cue can hold with two-digit hours (99:59:59,999).
     /// </summary>
@@ -32,9 +21,9 @@ public sealed class SrtDocument
 
     private SrtDocument(
         byte[] data,
-        SrtEncoding encoding,
+        SubtitleEncoding encoding,
         string lineEnding,
-        IReadOnlyList<SrtCue> cues,
+        IReadOnlyList<SubtitleCue> cues,
         int[] byteOffsets,
         int tailTerminators)
     {
@@ -44,28 +33,28 @@ public sealed class SrtDocument
         Cues = cues;
         this.byteOffsets = byteOffsets;
         TailTerminators = tailTerminators;
-        Hash = ComputeHash(data);
+        Hash = SubtitleHash.Compute(data);
     }
 
-    /// <summary>
-    /// Gets the SHA-256 of the file content, lower-case hex.
-    /// </summary>
+    /// <inheritdoc/>
+    public SubtitleFormat Format => SubtitleFormat.Srt;
+
+    /// <inheritdoc/>
     public string Hash { get; }
 
-    /// <summary>
-    /// Gets the detected encoding.
-    /// </summary>
-    public SrtEncoding Encoding { get; }
+    /// <inheritdoc/>
+    public SubtitleEncoding Encoding { get; }
 
     /// <summary>
     /// Gets the line ending used for new text: <c>\r\n</c>, <c>\n</c> or <c>\r</c>, whichever the file uses most.
     /// </summary>
     public string LineEnding { get; }
 
-    /// <summary>
-    /// Gets the cues in file order.
-    /// </summary>
-    public IReadOnlyList<SrtCue> Cues { get; }
+    /// <inheritdoc/>
+    public IReadOnlyList<SubtitleCue> Cues { get; }
+
+    /// <inheritdoc/>
+    public ReadOnlyMemory<byte> Content => data;
 
     /// <summary>
     /// Gets how many line terminators end the file (counting blank lines after the last cue text), 0 or more.
@@ -76,14 +65,6 @@ public sealed class SrtDocument
     /// Gets the original bytes.
     /// </summary>
     internal ReadOnlySpan<byte> Data => data;
-
-    /// <summary>
-    /// SHA-256 of some bytes, lower-case hex.
-    /// </summary>
-    /// <param name="content">The bytes.</param>
-    /// <returns>The hash.</returns>
-    public static string ComputeHash(ReadOnlySpan<byte> content) =>
-        Convert.ToHexStringLower(SHA256.HashData(content));
 
     /// <summary>
     /// Parses an .srt file leniently. When the file cannot be parsed reliably the result carries the
@@ -104,8 +85,8 @@ public sealed class SrtDocument
     /// <param name="edits">The edits.</param>
     /// <param name="runtimeMs">The item's runtime in milliseconds; added cues may not end after it. Null skips the check.</param>
     /// <returns>The new content and bookkeeping for the client.</returns>
-    /// <exception cref="SrtEditException">The edits are invalid or conflict with the file. Nothing was changed.</exception>
-    public SrtApplyResult Apply(IReadOnlyList<SrtEdit> edits, long? runtimeMs = null)
+    /// <exception cref="SubtitleEditException">The edits are invalid or conflict with the file. Nothing was changed.</exception>
+    public SubtitleApplyResult Apply(IReadOnlyList<SubtitleEdit> edits, long? runtimeMs = null)
     {
         ArgumentNullException.ThrowIfNull(edits);
         return SrtEditor.Apply(this, edits, runtimeMs);
@@ -146,9 +127,9 @@ public sealed class SrtDocument
     /// <returns>The document.</returns>
     internal static SrtDocument Create(
         byte[] data,
-        SrtEncoding encoding,
+        SubtitleEncoding encoding,
         string lineEnding,
-        IReadOnlyList<SrtCue> cues,
+        IReadOnlyList<SubtitleCue> cues,
         int[] byteOffsets,
         int tailTerminators) =>
         new(data, encoding, lineEnding, cues, byteOffsets, tailTerminators);
