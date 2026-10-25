@@ -10,6 +10,9 @@ const ORIGIN = 'http://sqe-fake.test';
 // The mock server: settings, users and submissions. SUBS_ON in the query turns submissions on.
 const mock = `
 window.sent = [];
+// jellyfin-web's createElement polyfill takes a type-extension string, not an options object (it calls toLowerCase).
+const realCreate = document.createElement.bind(document);
+document.createElement = function (tag, ext) { if (ext !== undefined) { ext.toLowerCase(); } return realCreate(tag); };
 window.config = { AllowUserSubmissions: location.search.indexOf('on=1') >= 0, UserEdits: 'Off', UserEditUserIds: ['u2'],
   MaxPendingSubmissionsPerUser: 50, BackupMode: 'OriginalOnly', BackupKeepLastSaves: 5 };
 const edit = (i, oldText, newText) => ({ type: 'edit', cueIndex: i, cueStart: i * 1000, oldText: oldText, newText: newText, outcome: 'Pending' });

@@ -98,12 +98,8 @@
                 }
 
                 // Everything a user wrote is shown with textContent only.
-                function el(tag, className, text, is) {
-                    // jellyfin-web's elements (emby-button, emby-checkbox) are upgraded only when created with "is".
-                    var node = is ? document.createElement(tag, { is: is }) : document.createElement(tag);
-                    if (is) {
-                        node.setAttribute('is', is);
-                    }
+                function el(tag, className, text) {
+                    var node = document.createElement(tag);
 
                     if (className) {
                         node.className = className;
@@ -166,15 +162,15 @@
                     }
 
                     others.forEach(function (u) {
+                        // jellyfin-web upgrades is="emby-checkbox" only from parsed markup (its createElement
+                        // polyfill does not take an options object), so the checkbox is written as HTML and the
+                        // user's name filled in afterwards as text.
                         var container = el('div', 'checkboxContainer');
-                        var label = el('label', 'emby-checkbox-label');
-                        var input = el('input', 'sqe-user-edit', null, 'emby-checkbox');
-                        input.type = 'checkbox';
+                        container.innerHTML = '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="sqe-user-edit" /><span></span></label>';
+                        var input = container.querySelector('input');
                         input.setAttribute('data-user-id', u.Id);
                         input.checked = wanted.indexOf(String(u.Id).replace(/-/g, '').toLowerCase()) >= 0;
-                        label.appendChild(input);
-                        label.appendChild(el('span', null, u.Name));
-                        container.appendChild(label);
+                        container.querySelector('span').textContent = u.Name;
                         box.appendChild(container);
                     });
                     showUserList();
@@ -185,7 +181,12 @@
                     Promise.all([ApiClient.getPluginConfiguration(pluginUniqueId), ApiClient.getUsers()]).then(function (results) {
                         var config = results[0];
                         q('#UserEdits').value = config.UserEdits || 'Off';
-                        renderUsers(results[1], config.UserEditUserIds);
+                        try {
+                            renderUsers(results[1], config.UserEditUserIds);
+                        } catch (err) {
+                            console.error('Subtitle Quick Edit: could not list the users', err);
+                        }
+
                         q('#AllowUserSubmissions').checked = config.AllowUserSubmissions;
                         q('#MaxPendingSubmissionsPerUser').value = config.MaxPendingSubmissionsPerUser;
                         q('#BackupMode').value = config.BackupMode;
@@ -291,14 +292,14 @@
                     result.hidden = true;
                     if (pending && submissionsOn) {
                         var actions = el('div', 'sqe-sub-actions');
-                        var approve = el('button', 'raised button-submit emby-button sqe-approve', 'Approve selected', 'emby-button');
+                        var approve = el('button', 'raised button-submit emby-button sqe-approve', 'Approve selected');
                         approve.type = 'button';
                         var reason = el('input', 'sqe-reason');
                         reason.type = 'text';
                         reason.maxLength = 500;
                         reason.placeholder = 'Reason, shown to the user (optional)';
                         reason.setAttribute('aria-label', 'Reason for rejecting');
-                        var reject = el('button', 'raised emby-button sqe-reject', 'Reject', 'emby-button');
+                        var reject = el('button', 'raised emby-button sqe-reject', 'Reject');
                         reject.type = 'button';
                         approve.addEventListener('click', function () {
                             var chosen = Array.prototype.map.call(box.querySelectorAll('.sqe-pick:checked'), function (c) {
