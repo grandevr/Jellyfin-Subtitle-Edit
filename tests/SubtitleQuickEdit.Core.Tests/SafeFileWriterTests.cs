@@ -522,7 +522,7 @@ public class SafeFileWriterTests
         FileOwnership before = metadata.Get(prepared)!.Value;
         if (UnixFileMetadata.CurrentGid() == before.Gid)
         {
-            Integration.SkippedBecause("the fixture's group is the user's own group; run devtools/prepare_mismatch.sh");
+            Integration.SkippedBecause("the fixture's group is the user's own group; run devtools/prepare_mismatch.sh from the dev branch");
             return;
         }
 

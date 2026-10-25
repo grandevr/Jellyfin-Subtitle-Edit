@@ -1,6 +1,6 @@
 // Browser smoke test of the plugin settings page (Configuration/configPage.html) with a mock ApiClient and Dashboard.
 // Needs no Jellyfin server, only Playwright for Node and its Chromium:
-//   node testdata/browser/config_page_smoke.js   (with Playwright on NODE_PATH)
+//   node tests/browser/config_page_smoke.js   (with Playwright on NODE_PATH)
 const { chromium } = require('playwright');
 const fs = require('fs');
 const pagePath = require('path').join(__dirname, '..', '..', 'src', 'Jellyfin.Plugin.SubtitleQuickEdit', 'Configuration', 'configPage.html');

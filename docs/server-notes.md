@@ -1,19 +1,13 @@
-# Stage 0 findings (2026-10-16)
+# Notes on Jellyfin server behaviour
 
-Test server: container `jellyfin-test` on the test host, `$SQE_TEST_ROOT`, $JF_BASE,
-image pinned to the live digest sha256:799509f8... (Jellyfin 12.2.0, linuxserver 12.2ubu2604-ls54).
+What Jellyfin 12.2 was found to do (read from the source at tag v12.2 and checked on a throwaway test server,
+2026-10-16). The plugin's design rests on these; re-check them when Jellyfin changes.
 
 ## Build
-- Runtime: net10.0 (10.0.12). SDK image: mcr.microsoft.com/dotnet/sdk:10.0.
-- NuGet: Jellyfin.Controller / Jellyfin.Model 12.2.0 exist.
-- Official template (master, 2026-09-18) is net9.0 / Jellyfin 10.11.5 / targetAbi 10.11.0.0.
-  Our copy: TargetFramework net10.0, Jellyfin.Controller + Model 12.2.0, targetAbi 12.2.0.0, framework net10.0.
-- Builds with 0 warnings, 0 errors, TreatWarningsAsErrors on. No analyzer rule had to be relaxed.
-- The built template DLL loads on 12.2 ("Loaded plugin: Template 0.0.0.0").
-- Build command (as uid 1000, nuget cache inside the source folder):
-  docker run --rm --user 1000:1000 -e HOME=/tmp -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1
-  -e NUGET_PACKAGES=/src/.nuget -v $SQE_TEST_ROOT/src/<proj>:/src -w /src
-  mcr.microsoft.com/dotnet/sdk:10.0 dotnet build -c Release
+- Runtime: net10.0. Jellyfin.Controller / Jellyfin.Model come from NuGet.
+- The official plugin template (2026-09) targeted net9.0 / Jellyfin 10.11.5; this project uses a copy bumped to
+  net10.0 and the Jellyfin 12.x packages. It builds with 0 warnings and `TreatWarningsAsErrors` on, with no analyzer
+  rule relaxed.
 
 ## File Transformation
 - 3.0.2.0, asset Release-12.2.0.zip (manifest lists targetAbi 12.2.0.0). Zip = DLL + deps.json + logo + pdb, no meta.json.
@@ -21,7 +15,7 @@ image pinned to the live digest sha256:799509f8... (Jellyfin 12.2.0, linuxserver
   "[FileTransformation] Installing response transformation middleware".
 - Cannot be referenced as a library (separate load context); register transformations by reflection.
 
-## Jellyfin 12.2 behaviour (source at tag v12.2 + tested on the test server)
+## Jellyfin 12.2 behaviour (source at tag v12.2 + tested on a test server)
 - External .srt that the parser supports is read from disk on every request (SubtitleEncoder.GetReadableFile returns
   the file path; no cache copy). The cache with size:mtime .meta files only covers extracted/converted tracks.
   Tested: edited a file on disk, next Stream.vtt fetch showed the new text, no refresh, no restart.
@@ -40,5 +34,5 @@ image pinned to the live digest sha256:799509f8... (Jellyfin 12.2.0, linuxserver
 
 ## Gotchas
 - Jellyfin 12 ignores the X-Emby-Authorization header; use Authorization: MediaBrowser ... Token="...".
-- A temp-file + rename write (what sed -i does) gives the new file the process's primary group (104), not the original's (1000).
-  The Jellyfin user is in groups 104 and 100 only, so it cannot chgrp back to 1000. Owner (uid 1000) is unaffected.
+- A temp-file + rename write (what sed -i does) gives the new file the process's primary group, not the original's. When the
+  Jellyfin user is not a member of the file's group it cannot change the group back. The owner is unaffected.
