@@ -71,7 +71,7 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
 - `devtools/mutation_check.py` breaks the code in scratch copies (38 ways) and requires the unit tests to fail for each break.
 - Client, no server needed: `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js` (181 tests),
   `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` (54 of 54 killed), and with Playwright for
-  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (90 checks against a fake jellyfin-web page, as admin, submitter and a user without rights, with an ASS file drawn as text or by JASSUB, and with a track inside the video), and
+  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (91 checks against a fake jellyfin-web page, as admin, submitter and a user without rights, with an ASS file drawn as text or by JASSUB, and with a track inside the video), and
   `node testdata/browser/config_page_smoke.js` (18 checks of the settings page with a mock server).
 - Client against the test server: `testdata/browser/stage3_tests.py` (see its header; also the stage 4 user modes, which
   change the plugin settings and put the defaults back). It needs the TestWebm library and

@@ -205,11 +205,26 @@ def admin_extract(browser, pages):
         info("panel: %r" % what)
         check("embedded: the panel names a SubRip copy next to the video", "TestWebm 03" in what and ".srt" in what, what)
         shot(page, "6c-make")
-        old_video = page.evaluate("() => { window.__sqeOldVideo = document.querySelector('video.htmlvideoplayer'); return true; }")
+        # jellyfin-web either makes a new <video> or gives the one it has a new source ('emptied').
+        page.evaluate("() => { const v = document.querySelector('video.htmlvideoplayer'); window.__sqeOldVideo = v;"
+                      " window.__sqeEmptied = 0; v.addEventListener('emptied', () => { window.__sqeEmptied++; }); }")
         page.locator(".sqe-panel .sqe-make").click()
-        page.wait_for_function("() => { const v = document.querySelector('video.htmlvideoplayer');"
-                               " return v && v !== window.__sqeOldVideo && v.readyState >= 2; }", timeout=45000)
-        check("embedded: Make restarted playback (a new video element)", old_video)
+        restarted = True
+        try:
+            page.wait_for_function("() => { const v = document.querySelector('video.htmlvideoplayer');"
+                                   " return v && (v !== window.__sqeOldVideo || window.__sqeEmptied > 0) && v.readyState >= 2; }",
+                                   timeout=45000)
+        except Exception:
+            restarted = False
+        how = page.evaluate("() => { const v = document.querySelector('video.htmlvideoplayer');"
+                            " return { newElement: v !== window.__sqeOldVideo, emptied: window.__sqeEmptied, readyState: v ? v.readyState : null,"
+                            " status: (document.querySelector('.sqe-panel .sqe-status') || {}).textContent || null,"
+                            " toast: (document.querySelector('.sqe-toast') || {}).textContent || null }; }")
+        info("restart: %s" % json.dumps(how))
+        check("embedded: Make restarted playback", restarted, json.dumps(how))
+        if not restarted:
+            shot(page, "6c-no-restart")
+            return
         toast = page.evaluate("() => (document.querySelector('.sqe-toast') || {}).textContent || ''")
         info("toast: %r" % toast)
         emb2 = embedded_track()

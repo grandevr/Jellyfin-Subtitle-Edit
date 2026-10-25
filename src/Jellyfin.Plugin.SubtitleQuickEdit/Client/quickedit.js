@@ -63,6 +63,7 @@
         preview: null, // the timer that pauses the video at the end of a new line's Preview
         showSavedText: false, // custom renderer: show the file's saved text until Reload subtitles (the player has the old)
         trackShowing: null, // textTrackShowing() at the last refresh, to notice subtitles being switched on or off
+        switching: null, // { streamIndex, at } while playback is being restarted on another track (switchTo)
     };
 
     // ---- small helpers -----------------------------------------------------------------------------------------------
@@ -2296,9 +2297,11 @@
         setExtractBusy(true);
         showStatus((done ? done + ' ' : '') + 'Switching to it…');
         state.resumeOnClose = false; // the new playback starts by itself
+        state.switching = { streamIndex: streamIndex, at: now() };
         apiPost(play.path, undefined, play.params, true).then(function () {
             toast((done ? done + ' ' : '') + 'Press the edit button to fix a line.');
         }, function (err) {
+            state.switching = null;
             return describeError(err).then(function (message) {
                 if (state.panel === panel) {
                     setExtractBusy(false);
@@ -2383,27 +2386,17 @@
         }
 
         if (video !== state.video) {
-            // A new playback (jellyfin-web creates a new <video> each time).
-            closePanel();
-            state.video = video;
-            state.showSavedText = false;
+            // A new playback in a new <video> (jellyfin-web makes one when the player was closed in between).
             video.addEventListener('timeupdate', onVideoTime);
             video.addEventListener('seeked', onVideoTime);
+            video.addEventListener('emptied', onVideoEmptied);
             if (video.textTracks && video.textTracks.addEventListener) {
                 // A track's mode changes without any DOM change: jellyfin-web keeps its one text track disabled while
                 // it fetches a newly chosen subtitle, then shows it.
                 video.textTracks.addEventListener('change', scheduleRefresh);
                 video.textTracks.addEventListener('addtrack', scheduleRefresh);
             }
-            state.trackShowing = null;
-            state.playbackSeq++;
-            state.playbackStartedAt = now();
-            state.session = null;
-            state.menu = null;
-            state.target = null;
-            state.tracks = {};
-            state.cues = {};
-            state.sessionTried = false;
+            newPlayback(video);
         }
 
         if (state.mode && !state.sessionTried) {
@@ -2424,6 +2417,60 @@
         }
 
         updateButton();
+    }
+
+    function newPlayback(video) {
+        closePanel();
+        state.video = video;
+        state.showSavedText = false;
+        state.trackShowing = null;
+        state.playbackSeq++;
+        state.playbackStartedAt = now();
+        state.session = null;
+        state.menu = null;
+        state.target = null;
+        state.tracks = {};
+        state.cues = {};
+        state.sessionTried = false;
+        const switching = state.switching;
+        state.switching = null;
+        if (switching && now() - switching.at < MENU_WINDOW_MS) {
+            // Restarted on another track: trust that choice until Sessions has caught up, like a menu choice.
+            state.menu = { index: switching.streamIndex, at: now() };
+        }
+    }
+
+    /**
+     * jellyfin-web keeps its <video> when one playback follows another while the player is open (the next episode, a
+     * restart on another track) and gives it a new source; so does a seek or a track change in a transcoded stream.
+     */
+    function onVideoEmptied(e) {
+        const video = e.target;
+        if (video !== state.video) {
+            return;
+        }
+
+        if (state.switching) {
+            newPlayback(video);
+            scheduleRefresh();
+            return;
+        }
+
+        // Another item, or the same one again? Sessions tells, once it has caught up.
+        const seq = state.playbackSeq;
+        const before = state.session;
+        setTimeout(function () {
+            if (seq !== state.playbackSeq || !before || !state.mode) {
+                return;
+            }
+
+            loadSession(seq).then(function () {
+                if (seq === state.playbackSeq && state.session && !sameId(state.session.itemId, before.itemId)) {
+                    newPlayback(video);
+                    scheduleRefresh();
+                }
+            });
+        }, L.SESSIONS_LAG_MS + 1000);
     }
 
     function start() {

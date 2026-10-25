@@ -70,6 +70,7 @@ setTimeout(() => {
     'Sessions': () => [{ Id: 's1', NowPlayingItem: { Id: 'abc', RunTimeTicks: 600000000 }, PlayState: { MediaSourceId: 'abc', SubtitleStreamIndex: 0 } }],
     'SubtitleQuickEdit/Items/abc/Subtitles': () => EMBEDDED
       ? [{ streamIndex: 0, external: false, format: 'subrip', editable: false, extractable: true, reason: 'Embedded subtitle tracks cannot be edited.' }]
+        .concat(window.fakePlaying ? [{ streamIndex: 3, external: true, format: 'srt', editable: true, extractable: false }] : [])
       : [{ streamIndex: 0, external: true, format: FORMAT, editable: true, extractable: false }],
     'SubtitleQuickEdit/Items/abc/Subtitles/0/Extract': () => EXISTING
       ? Object.assign({ fileName: 'Ep.en.srt', format: 'srt', cueCount: 2, exists: true, existingHash: 'e1', existingStreamIndex: 3,
@@ -111,6 +112,8 @@ setTimeout(() => {
       }
       if (o.url === 'Sessions/s1/Playing') {
         window.fakePlaying = window.fakeParams['Sessions/s1/Playing'];
+        // Like jellyfin-web with the player open: the same <video> gets the new source (Sessions still shows the old track).
+        setTimeout(() => document.querySelector('video').dispatchEvent(new Event('emptied')), 200);
         return o.dataType === 'json' ? Promise.reject(new SyntaxError('Unexpected end of JSON input')) : Promise.resolve(undefined);
       }
       if (o.url === 'SubtitleQuickEdit/Items/abc/Subtitles/0/Submissions') {
@@ -585,6 +588,10 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   await e1.waitForSelector('.sqe-toast', { timeout: 3000 }).catch(() => null);
   checks['embedded: a message outside the panel says what happened'] =
     ((await e1.$eval('.sqe-toast', (x) => x.textContent).catch(() => '')) || '').indexOf('Made \u201cEp.en.srt\u201d.') === 0;
+  const onCopy = await e1.waitForFunction(() => { const d = window.SubtitleQuickEdit.debugState(); return d.target && d.target.streamIndex === 3; },
+    null, { timeout: 5000 }).then(() => true, () => false);
+  checks['embedded: after the restart in the same <video>, the button edits the copy'] = onCopy && !(await e1.$('.sqe-panel')) &&
+    (await e1.$eval('.sqe-edit-button', (x) => x.getAttribute('aria-label')).catch(() => '')) === 'Edit subtitle line';
   await e1.close();
 
   const e2 = await embeddedPage('&existing=1&role=submitter');
