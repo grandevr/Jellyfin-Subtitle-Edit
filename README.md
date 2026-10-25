@@ -68,7 +68,7 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
 - Stage 5 API tests: `python3 -I testdata/stage5_api_tests.py <secrets-dir>` writes a richer `.vtt` and `.ass` over
   episode 3's and checks cues, refusals, saves byte for byte (BOM, CRLF, tags, comments and other blocks kept), backups
   with the subtitle's extension, Restore, and an approved submission on an ASS file. It resets the fixtures at the end.
-- `devtools/mutation_check.py` breaks the code in scratch copies (28 ways) and requires the unit tests to fail for each break.
+- `devtools/mutation_check.py` breaks the code in scratch copies (38 ways) and requires the unit tests to fail for each break.
 - Client, no server needed: `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js` (174 tests),
   `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` (49 of 49 killed), and with Playwright for
   Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (79 checks against a fake jellyfin-web page, as admin, submitter and a user without rights, and with an ASS file drawn as text or by JASSUB), and
@@ -79,6 +79,9 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
   container before and after, because the API cannot remove the line it adds to TestWebm 03.
   `testdata/browser/stage5_tests.py` (same way of running) edits TestWebm 03's `.vtt` and `.ass` and restores them
   through the API; run `testdata/reset_webm03_formats.sh` in the test container once before the first run.
+- Stage 6 API tests: `python3 -I testdata/stage6_api_tests.py <secrets-dir>` makes episode 3's embedded track editable
+  as a submitter, edits it, compares and replaces it as admin, lists and deletes it, and checks the file's owner and
+  mode, the backups, the library refresh and the activity log entry. It resets the fixtures at the end.
 
 ## Analyzers
 
@@ -102,11 +105,15 @@ Every error answer has the shape `{ "code", "message", "cueIndex"?, "currentHash
 | Method and route | Who | Answers |
 |---|---|---|
 | `GET Me` | anyone signed in | `isAdmin`, `canEdit`, `canSubmit`, `submissionsOn`, `pendingReviews` (admins only, else null), `maxNoteLength` |
-| `GET Items/{itemId}/Subtitles` | editors and submitters (below), for items visible to them (library access included) | the item's subtitle streams: `streamIndex`, `language`, `title`, `external`, `format`, `editable`, `reason` |
+| `GET Items/{itemId}/Subtitles` | editors and submitters (below), for items visible to them (library access included) | the item's subtitle streams: `streamIndex`, `language`, `title`, `external`, `format`, `editable`, `reason`, `extractable` (embedded text track of a local video), `extractedStreamIndex` (the external file its extraction would write, when that already exists) |
 | `GET Items/{itemId}/Subtitles/{streamIndex}/Cues` | same | `hash` (SHA-256 of the file), `encoding`, and the cues (`index` = 1-based position, `start`, `end` in ms, `text` with `\n`) |
 | `POST Items/{itemId}/Subtitles/{streamIndex}/Edits` | editors (403 for everyone else) | `hash`, `savedCueIndexes`, `addedCues` (client id to position), `writeMethod` |
 | `POST Items/{itemId}/Subtitles/{streamIndex}/Restore` | editors | `hash`, `restored` (false when the file already had that content), `writeMethod` |
 | `POST Items/{itemId}/Subtitles/{streamIndex}/Submissions` | submitters | the stored submission (below) |
+| `GET Items/{itemId}/Subtitles/{streamIndex}/Extract` | editors and submitters | preview: `fileName`, `format`, `cueCount`, `exists`, `existingHash`, `existingStreamIndex`, `existingIsExtracted`, `canReplace`, and for admins when a file exists `cues` and `existingCues` |
+| `POST Items/{itemId}/Subtitles/{streamIndex}/Extract` | editors and submitters; replacing: admins | `fileName`, `hash`, `replaced`, `streamIndex` (null while the library refresh runs), `refreshPending` |
+| `GET Extracted` | admins | the files made from embedded tracks, newest first: `id`, `itemId`, `itemName`, `sourceStreamIndex`, `fileName`, `streamIndex`, `exists`, `edited`, `replaced`, `userId`, `userName`, `created` |
+| `DELETE Extracted/{id}` | admins | `fileName`, `backedUp` |
 | `GET Submissions/Mine` | anyone signed in | the caller's own submissions, newest first, in every state |
 | `POST Submissions/{id}/Withdraw` | the submitter, while pending (also with submissions off) | the submission, now `Withdrawn` |
 | `GET Submissions?status=pending\|decided\|all` | admins | submissions, newest first (default `pending`) |
@@ -129,6 +136,17 @@ start and text); changes not found are conflicts and are not written. If no chos
 written, `applied` is false and the submission stays pending with its conflicts marked. Reject body: `{ "reason"? }`.
 The newest 50 decided submissions are kept; pending ones are never deleted. Extra codes: 404 `SubmissionNotFound`;
 409 `NotPending` / `SubmissionsOff`; 400 `TextTooLong` / `InvalidChoice`; 429 `TooManyPending`; 500 `StorageFailed`.
+
+Extract body: `{ "replace"?, "expectedExistingHash"? }`. Jellyfin extracts the embedded track into its cache (its own
+subtitle encoder; ASS and SSA as they are, every other text codec as SubRip) and the plugin writes it next to the video
+as `{video name}.{language}[.default][.forced][.sdh].{srt|ass|ssa}` (two-letter language code when there is one), with
+the video's owner and group and its mode without execute bits, then refreshes the item. The video is never changed. A
+file of that name is never overwritten: 409 `FileExists` (with `currentHash`), unless an admin sends `replace` with the
+`existingHash` the preview showed (409 `FileChanged` when it no longer matches, 403 for others); the replaced file is
+kept as `…_replaced.srt` in the backups. Each extraction is recorded in `data/SubtitleQuickEdit/extracted/{id}.json`;
+`DELETE Extracted/{id}` keeps the file's last content as `…_deleted.srt` and refreshes the item. A user who is not an
+admin gets an activity log entry for each extraction. Extra codes: 400 `AlreadyExternal` / `NotExtractable` (picture
+track, not a local video); 413 `TooLarge`; 422 `NotEditable`; 404 `ExtractedNotFound`; 500 `ExtractFailed`.
 
 Edits body: `{ "baseHash", "edits": [ {"type":"edit","cueIndex","oldText","newText"} | {"type":"add","clientId","startMs","endMs","text"} ], "keepRestorePoint"? }`.
 With `keepRestorePoint` (the editor sends it on the first save of a browser session) the file as it was is also kept
@@ -201,7 +219,8 @@ Docker image; `IApplicationPaths.ProgramDataPath`). It is outside the versioned 
 plugin update and a rollback (tested: delete the plugin folder, restart, backups remain, reinstall). Files are named
 `{itemId}_{streamIndex}_{pathId}_{utc time}_original.srt`, with the subtitle's own extension (content from before the first save of that subtitle;
 never overwritten or removed) and, in "Original + last N saves" mode, `…_save.srt` for the content from before each
-later save, pruned to the newest N. A backup that cannot be written stops the save.
+later save, pruned to the newest N. A backup that cannot be written stops the save. `…_replaced` and `…_deleted` files
+hold a subtitle file that an extraction replaced and an extracted file that an admin deleted; they are never pruned.
 
 ## Behaviour worth knowing
 

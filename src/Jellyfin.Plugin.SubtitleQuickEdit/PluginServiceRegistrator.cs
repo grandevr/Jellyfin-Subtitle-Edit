@@ -14,6 +14,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         serviceCollection.AddSingleton<SubtitleTrackResolver>();
+        serviceCollection.AddSingleton<EmbeddedTrackService>();
         serviceCollection.AddHostedService<StartupService>();
         serviceCollection.AddHostedService<FileTransformationRegistrar>();
     }

@@ -26,7 +26,8 @@ namespace Jellyfin.Plugin.SubtitleQuickEdit.Api;
 
 /// <summary>
 /// The Subtitle Editor server API. The client sends an item id and a subtitle stream index, never a path:
-/// the file is found from Jellyfin's own library data. The submission routes are in the other part of this class.
+/// the file is found from Jellyfin's own library data. The submission and extraction routes are in the other parts of
+/// this class.
 /// </summary>
 [ApiController]
 [Route("SubtitleQuickEdit")]
@@ -42,6 +43,7 @@ public partial class SubtitleQuickEditController : ControllerBase
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private readonly SubtitleTrackResolver resolver;
+    private readonly EmbeddedTrackService embedded;
     private readonly IUserManager userManager;
     private readonly IActivityManager activityManager;
     private readonly ILogger<SubtitleQuickEditController> logger;
@@ -50,16 +52,19 @@ public partial class SubtitleQuickEditController : ControllerBase
     /// Initializes a new instance of the <see cref="SubtitleQuickEditController"/> class.
     /// </summary>
     /// <param name="resolver">Finds items and subtitle files.</param>
+    /// <param name="embedded">Reads embedded tracks and refreshes items.</param>
     /// <param name="userManager">The user manager.</param>
     /// <param name="activityManager">Jellyfin's activity log, where new submissions are announced to admins.</param>
     /// <param name="logger">The logger.</param>
     public SubtitleQuickEditController(
         SubtitleTrackResolver resolver,
+        EmbeddedTrackService embedded,
         IUserManager userManager,
         IActivityManager activityManager,
         ILogger<SubtitleQuickEditController> logger)
     {
         this.resolver = resolver;
+        this.embedded = embedded;
         this.userManager = userManager;
         this.activityManager = activityManager;
         this.logger = logger;
@@ -100,6 +105,7 @@ public partial class SubtitleQuickEditController : ControllerBase
             return denied!;
         }
 
+        string? videoPath = EmbeddedTrackService.LocalVideoPath(item);
         var tracks = new List<SubtitleTrackDto>();
         foreach (MediaStream stream in resolver.GetSubtitleStreams(item))
         {
@@ -114,6 +120,12 @@ public partial class SubtitleQuickEditController : ControllerBase
                     ? Path.GetExtension(stream.Path).TrimStart('.').ToLowerInvariant()
                     : stream.Codec,
             };
+
+            if (EmbeddedTrackService.IsExtractable(stream))
+            {
+                dto.Extractable = videoPath is not null;
+                dto.ExtractedStreamIndex = videoPath is null ? null : ExistingExtraction(item, stream, videoPath);
+            }
 
             if (resolution.Path is null)
             {
@@ -176,15 +188,7 @@ public partial class SubtitleQuickEditController : ControllerBase
             Encoding = doc.Encoding.Name,
             Format = SubtitleFormats.Name(doc.Format),
             TimePrecisionMs = doc.Format == SubtitleFormat.Ass ? 10 : 1,
-            Cues = doc.Cues.Select(c => new CueDto
-            {
-                Index = c.Position,
-                Start = c.StartMs,
-                End = c.EndMs,
-                Text = c.Text,
-                Style = c.Style,
-                ReadOnly = c.ReadOnly,
-            }).ToList(),
+            Cues = ToCueDtos(doc),
         };
     }
 
@@ -382,6 +386,16 @@ public partial class SubtitleQuickEditController : ControllerBase
         }
     }
 
+    private static List<CueDto> ToCueDtos(ISubtitleDocument doc) => doc.Cues.Select(c => new CueDto
+    {
+        Index = c.Position,
+        Start = c.StartMs,
+        End = c.EndMs,
+        Text = c.Text,
+        Style = c.Style,
+        ReadOnly = c.ReadOnly,
+    }).ToList();
+
     private static bool IsHash(string? value)
     {
         string trimmed = value?.Trim() ?? string.Empty;
@@ -496,11 +510,13 @@ public partial class SubtitleQuickEditController : ControllerBase
     private static long? RuntimeMs(BaseItem item) =>
         item.RunTimeTicks.HasValue ? item.RunTimeTicks.Value / TimeSpan.TicksPerMillisecond : null;
 
-    private static SubtitleSaveService NewSaveService()
+    private static SubtitleSaveService NewSaveService() => new(new SafeFileWriter(), NewBackupStore());
+
+    private static BackupStore NewBackupStore()
     {
         PluginConfiguration config = Config();
         string backupFolder = Plugin.Instance?.BackupFolder ?? Path.Combine(Path.GetTempPath(), "SubtitleQuickEdit", "backups");
-        return new SubtitleSaveService(new SafeFileWriter(), new BackupStore(backupFolder, config.BackupMode, config.BackupKeepLastSaves));
+        return new BackupStore(backupFolder, config.BackupMode, config.BackupKeepLastSaves);
     }
 
     /// <summary>

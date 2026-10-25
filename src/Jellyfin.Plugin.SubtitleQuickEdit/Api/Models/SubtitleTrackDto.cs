@@ -48,4 +48,17 @@ public class SubtitleTrackDto
     /// </summary>
     [JsonPropertyName("reason")]
     public string? Reason { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the track is embedded text that can be extracted to an editable file.
+    /// </summary>
+    [JsonPropertyName("extractable")]
+    public bool Extractable { get; set; }
+
+    /// <summary>
+    /// Gets or sets, for an extractable track, the stream index of the external file its extraction would write (it
+    /// already exists), or null.
+    /// </summary>
+    [JsonPropertyName("extractedStreamIndex")]
+    public int? ExtractedStreamIndex { get; set; }
 }

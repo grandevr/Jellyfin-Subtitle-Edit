@@ -11,7 +11,7 @@ using MediaBrowser.Model.Serialization;
 namespace Jellyfin.Plugin.SubtitleQuickEdit;
 
 /// <summary>
-/// The Subtitle Editor plugin: edit the text of external .srt, .vtt and .ass subtitles from the web player.
+/// The Subtitle Editor plugin: edit the text of external .srt, .vtt and .ass subtitles from the web player, and make embedded text tracks editable.
 /// </summary>
 public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
@@ -56,6 +56,11 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     /// Gets the folder for user submissions waiting for, or decided by, an admin.
     /// </summary>
     public string SubmissionsFolder => Path.Combine(DataFolder, "submissions");
+
+    /// <summary>
+    /// Gets the folder for the records of subtitle files made from embedded tracks.
+    /// </summary>
+    public string ExtractedFolder => Path.Combine(DataFolder, "extracted");
 
     /// <inheritdoc />
     public IEnumerable<PluginPageInfo> GetPages()
