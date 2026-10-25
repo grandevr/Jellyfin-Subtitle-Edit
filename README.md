@@ -58,7 +58,7 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
   the test is there to catch.
 - Install on the test server only: build the plugin straight into its plugin folder
   (`DOCKER_FLAGS="-v $SQE_TEST_ROOT/config/data/plugins:/plugins" devtools/dotnet.sh build
-  src/Jellyfin.Plugin.SubtitleQuickEdit -c Release -o /plugins/SubtitleQuickEdit_1.2.0.0`, after removing any older `SubtitleQuickEdit_*` folder) and restart the container.
+  src/Jellyfin.Plugin.SubtitleQuickEdit -c Release -o /plugins/SubtitleQuickEdit_1.2.1.0`, after removing any older `SubtitleQuickEdit_*` folder) and restart the container.
   Jellyfin writes its own `meta.json`. `UtfUnknown.dll` is not shipped: the plugin uses the copy Jellyfin already has.
 - API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>` resets the fixtures and runs 75 checks against the
   test server (see below).
@@ -227,7 +227,7 @@ hold a subtitle file that an extraction replaced and an extracted file that an a
 ## Behaviour worth knowing
 
 **Parsing** is lenient (missing blank lines, missing number lines, stray spaces, `.` or `,` before milliseconds, CR, LF
-or CRLF). A file is *not editable*, with a reason, when it is empty, over 8 MB, has no detectable or an unsupported
+or CRLF). A file is *not editable*, with a reason, when it is empty, over 32 MB, has no detectable or an unsupported
 encoding (UTF-32 included), has bytes invalid for the detected encoding, does not survive decode and re-encode
 byte-for-byte, has text outside any cue, or has a `-->` line that is not a valid time line. (Jellyfin itself drops an
 external `.srt` that ffprobe cannot read, so a wholly garbage file never shows up as a track.)
