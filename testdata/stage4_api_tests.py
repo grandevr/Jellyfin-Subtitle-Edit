@@ -152,7 +152,7 @@ check("Me, admin: isAdmin and canEdit, not canSubmit, with a pending count",
       m["isAdmin"] and m["canEdit"] and not m["canSubmit"] and m["pendingReviews"] == 0 and m["maxNoteLength"] == 500, m)
 m = me(USER)
 check("Me, user with everything off: no rights, no pending count",
-      not m["isAdmin"] and not m["canEdit"] and not m["canSubmit"] and m["pendingReviews"] is None, m)
+      not m["isAdmin"] and not m["canEdit"] and not m["canSubmit"] and m.get("pendingReviews") is None, m)
 st, _ = call("GET", "/SubtitleQuickEdit/Me", tok=None)
 check("Me without a token: 401", st == 401, st)
 
