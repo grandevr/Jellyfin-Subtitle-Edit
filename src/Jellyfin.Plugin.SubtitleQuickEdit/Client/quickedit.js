@@ -17,6 +17,7 @@
         osdButton: '.videoOsdBottom button',
         menuItem: '.actionSheetMenuItem[data-id]',
         customSubtitle: '.videoSubtitles .videoSubtitlesInner', // jellyfin-web's own subtitle element (custom renderer)
+        assRenderer: '.JASSUB, .videoPlayerContainer canvas', // JASSUB's canvas, which draws ASS/SSA instead of a text track
     };
     const BODY_IDLE_CLASS = 'mouseIdle'; // on <body> while the OSD is hidden
     const TEXT_TRACK_LABEL = 'manualTrack'; // the one text track jellyfin-web fills with the chosen subtitle's cues
@@ -231,7 +232,10 @@
         });
     }
 
-    /** False when the page shows that subtitles are off (the text track is disabled); true otherwise or when unknown. */
+    /**
+     * False when the page shows that subtitles are off (the text track is disabled and nothing else draws them); true
+     * otherwise or when unknown. The player draws ASS/SSA with JASSUB on a canvas and leaves the text track disabled.
+     */
     function textTrackShowing(video) {
         const tracks = video && video.textTracks;
         if (!tracks) {
@@ -240,7 +244,7 @@
 
         for (let i = 0; i < tracks.length; i++) {
             if (tracks[i].label === TEXT_TRACK_LABEL) {
-                return tracks[i].mode !== 'disabled';
+                return tracks[i].mode !== 'disabled' || Boolean(document.querySelector(SEL.assRenderer));
             }
         }
 

@@ -14,6 +14,13 @@ const ORIGIN = 'http://sqe-fake.test';
 const fake = `
 window.jfKeys = [];
 const CUSTOM = location.search.indexOf('custom=1') >= 0; // jellyfin-web's custom subtitle renderer instead of a text track
+const JASSUB = location.search.indexOf('jassub=1') >= 0; // ASS drawn by JASSUB on a canvas; the text track stays disabled
+function showJassub() {
+  if (!document.querySelector('.JASSUB')) {
+    const box = document.createElement('div'); box.className = 'JASSUB'; box.appendChild(document.createElement('canvas'));
+    document.querySelector('.videoPlayerContainer').appendChild(box); window.fakeJassubShown = (window.fakeJassubShown || 0) + 1;
+  }
+}
 const ROLE = (location.search.match(/role=(\\w+)/) || [])[1] || 'admin'; // admin, submitter or none
 window.fakeSubs = [];
 window.fakeEvents = null;
@@ -110,7 +117,9 @@ setTimeout(() => {
         return Promise.resolve({ hash: f.hash, restored: true, writeMethod: 'Rename' });
       }
       if (o.url === 'Sessions/s1/Command' && body.Name === 'SetSubtitleStreamIndex') {
-        if (CUSTOM) {
+        if (JASSUB) {
+          if (body.Arguments.Index === '-1') { const box = document.querySelector('.JASSUB'); if (box) { box.remove(); } } else { setTimeout(showJassub, 300); }
+        } else if (CUSTOM) {
           if (body.Arguments.Index === '-1') { const box = document.querySelector('.videoSubtitles'); if (box) { box.remove(); } } else { setTimeout(showCustom, 300); }
         } else {
           const track = Array.from(document.querySelector('video').textTracks).find((t) => t.label === 'manualTrack');
@@ -129,7 +138,8 @@ setTimeout(() => {
   let time = 0;
   Object.defineProperty(v, 'currentTime', { get: () => time, set: (x) => { time = x; v.dispatchEvent(new Event('seeked')); v.dispatchEvent(new Event('timeupdate')); } });
   v.addEventListener('timeupdate', renderCustom); // jellyfin-web's own handler, registered before the editor sees the video
-  if (CUSTOM) { showCustom(); } else { const track = v.addTextTrack('subtitles', 'manualTrack', 'und'); track.mode = 'showing'; fillTrack(track); }
+  if (JASSUB) { const track = v.addTextTrack('subtitles', 'manualTrack', 'und'); track.mode = 'disabled'; showJassub(); }
+  else if (CUSTOM) { showCustom(); } else { const track = v.addTextTrack('subtitles', 'manualTrack', 'und'); track.mode = 'showing'; fillTrack(track); }
   document.body.insertAdjacentHTML('beforeend', '<div class="videoOsdBottom"><div class="osdControls"><div class="buttons"><button class="btnSubtitles">CC</button><button class="btnFullscreen">F</button></div></div></div>');
 }, 800);`;
 const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><body><script>${script}</script><script>${fake}</script></body></html>`;
@@ -490,6 +500,31 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   await a.waitForSelector('.sqe-cue-text', { timeout: 5000 });
   checks['ass: the toggle is remembered after a page reload'] = await a.$eval('.sqe-tags-toggle', (e) => e.checked);
   await a.close();
+
+  // 5d: ASS drawn by JASSUB (no text track showing): the editor still opens, and Reload waits for the player.
+  const j = await b.newPage();
+  await j.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  j.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+  j.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
+  j.on('dialog', (d) => d.accept());
+  await j.goto(ORIGIN + '/web/index.html?format=ass&jassub=1');
+  await j.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  await j.click('.sqe-edit-button');
+  await j.waitForSelector('.sqe-cue-text', { timeout: 5000 });
+  checks['jassub: the editor opens for ASS drawn on a canvas'] = (await j.inputValue('.sqe-cue-text')) === 'Hello there';
+  await j.fill('.sqe-cue-text', 'Hello canvas');
+  await j.keyboard.press('Control+Enter');
+  checks['jassub: the staged note says Save and Reload show it'] =
+    (await j.$eval('.sqe-status', (e) => e.textContent)).indexOf('Reload subtitles then shows it') >= 0;
+  await j.keyboard.press('Control+s');
+  await j.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Saved') === 0, null, { timeout: 5000 });
+  await j.click('.sqe-reload');
+  await j.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Subtitles reloaded') === 0, null, { timeout: 12000 })
+    .catch(() => null);
+  checks['jassub: Reload switches the subtitle off and on, and finishes'] =
+    (await j.$eval('.sqe-status', (e) => e.textContent)).indexOf('Subtitles reloaded') === 0 &&
+    (await j.evaluate(() => window.fakeJassubShown)) === 2 && Boolean(await j.$('.JASSUB'));
+  await j.close();
 
   checks['no errors in the console'] = logs.every((l) => !/^(error|pageerror)/.test(l));
 

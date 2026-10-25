@@ -174,11 +174,21 @@ def seek_to(page, ms):
     })""", ms / 1000.0)
 
 
+def drawing_info(page):
+    """What draws the subtitle now: the text track's mode, JASSUB's element, canvases near the video."""
+    return page.evaluate("""() => { const v = document.querySelector('video.htmlvideoplayer');
+        const tr = v ? Array.from(v.textTracks).find((x) => x.label === 'manualTrack') : null;
+        return { manualTrack: tr ? tr.mode : null, jassub: document.querySelectorAll('.JASSUB').length,
+                 canvases: document.querySelectorAll('.videoPlayerContainer canvas').length,
+                 customElement: Boolean(document.querySelector('.videoSubtitles .videoSubtitlesInner')) }; }""")
+
+
 def open_panel(page, index, ms):
     play(page)
     choose_subtitle(page, index)
     seek_to(page, ms)
-    wait_button(page, True, 15)
+    shown = wait_button(page, True, 15)
+    info("stream %d: edit button %s; drawing %s" % (index, "shown" if shown else "NOT shown", json.dumps(drawing_info(page))))
     show_osd(page)
     page.locator(".sqe-edit-button").first.click()
     page.wait_for_selector(".sqe-panel .sqe-cue-text", timeout=10000)

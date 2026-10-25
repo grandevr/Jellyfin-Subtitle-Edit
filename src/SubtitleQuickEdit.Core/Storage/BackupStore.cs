@@ -35,6 +35,7 @@ public sealed partial class BackupStore
     private readonly BackupMode mode;
     private readonly int keepLastSaves;
     private readonly IDurability durability;
+    private readonly Func<DateTime> utcNow;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BackupStore"/> class.
@@ -50,6 +51,20 @@ public sealed partial class BackupStore
         this.mode = mode;
         this.keepLastSaves = Math.Max(1, keepLastSaves);
         this.durability = durability ?? PlatformServices.Current.Durability;
+        utcNow = () => DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="BackupStore"/> class with a fixed clock, for tests.
+    /// </summary>
+    /// <param name="folder">The backup folder; created when needed.</param>
+    /// <param name="mode">Which backups to keep.</param>
+    /// <param name="keepLastSaves">How many earlier versions to keep.</param>
+    /// <param name="utcNow">Gives the current UTC time.</param>
+    internal BackupStore(string folder, BackupMode mode, int keepLastSaves, Func<DateTime> utcNow)
+        : this(folder, mode, keepLastSaves)
+    {
+        this.utcNow = utcNow;
     }
 
     /// <summary>
@@ -189,7 +204,7 @@ public sealed partial class BackupStore
 
     private string WriteNew(string key, string kind, string extension, byte[] content)
     {
-        string stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmssfff'Z'", CultureInfo.InvariantCulture);
+        string stamp = utcNow().ToString("yyyyMMdd'T'HHmmssfff'Z'", CultureInfo.InvariantCulture);
         for (int attempt = 0; ; attempt++)
         {
             // "~" sorts after "_", so a second backup in the same millisecond still sorts as the newer one.

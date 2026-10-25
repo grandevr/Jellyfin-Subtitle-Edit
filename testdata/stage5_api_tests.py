@@ -202,6 +202,10 @@ subprocess.run([os.path.join(HERE, "reset_fixtures.sh")], check=True)
 check("settings: start from the defaults", configure(**DEFAULTS) == 204)
 st, items = call("GET", "/Items?Recursive=true&IncludeItemTypes=Episode&Fields=Path")
 EP3 = [it["Id"] for it in items["Items"] if "S01E03" in it["Path"]][0]
+st, ep3 = call("GET", "/Items?Ids=%s&Fields=RunTimeTicks" % EP3)
+RUNTIME_MS = (ep3["Items"][0].get("RunTimeTicks") or 0) // 10000
+# Episode 3's video is about 3 s long (make_ep3.sh cuts it to its embedded subtitle), and added lines must end by then.
+check("episode 3 runs at least 2.95 s, so the added lines below fit", RUNTIME_MS >= 2950, RUNTIME_MS)
 write_fixture(VTT_NAME, VTT)
 write_fixture(ASS_NAME, ASS)
 st, tracks = call("GET", "/SubtitleQuickEdit/Items/%s/Subtitles" % EP3)
@@ -221,25 +225,25 @@ check("vtt cues: three cues, the NOTE, STYLE and REGION blocks are not cues, mm:
 H = c["hash"]
 refused("vtt: '-->' in the text -> 400 InvalidEdit", VI, {"baseHash": H, "edits": [edit(1, "VTT line", "a --> b")]}, 400, "InvalidEdit")
 refused("vtt: a blank line in the text -> 400 InvalidEdit", VI, {"baseHash": H, "edits": [edit(1, "VTT line", "a\n\nb")]}, 400, "InvalidEdit")
-refused("vtt: an added line with '-->' -> 400 InvalidEdit", VI, {"baseHash": H, "edits": [add("x", 10000, 11000, "-->")]}, 400, "InvalidEdit")
+refused("vtt: an added line with '-->' -> 400 InvalidEdit", VI, {"baseHash": H, "edits": [add("x", 2000, 2900, "-->")]}, 400, "InvalidEdit")
 check("vtt: the refusals changed nothing and made no backup", read_file(VTT_NAME) == VTT and not backups(), backups())
 
 st, r = call("POST", sub(EP3, VI, "Edits"), {"baseHash": H, "keepRestorePoint": True, "edits": [
     edit(1, "VTT line", "VTT line, fixed"), edit(2, "<i>Styled VTT line</i>", "<i>Styled line, fixed</i>"),
-    add("v1", 10000, 11500, "Added VTT line")]})
+    add("v1", 2000, 2900, "Added VTT line")]})
 want = (VTT.replace(b"\nVTT line\n", b"\nVTT line, fixed\n")
         .replace(b"<i>Styled VTT line</i>", b"<i>Styled line, fixed</i>")
-        + b"\n00:00:10.000 --> 00:00:11.500\nAdded VTT line\n")
+        .replace(b"\n\n00:00:04.000", b"\n\n00:00:02.000 --> 00:00:02.900\nAdded VTT line\n\n00:00:04.000"))
 now = read_file(VTT_NAME)
-check("vtt save: 200, only the edited text changes and the new cue is appended (exact bytes)",
+check("vtt save: 200, only the edited text changes and the new cue goes before the next later cue (exact bytes)",
       st == 200 and now == want and r["hash"] == sha(want), (st, r, now[-120:]))
 check("vtt save: the header, NOTE, STYLE, REGION, the cue id and its settings are kept",
       now.startswith(b"WEBVTT - stage 5 fixture\nKind: captions\n\nNOTE kept as it is\n\nSTYLE\n")
       and b"\nintro\n00:01.000 --> 00:03.000 align:start line:0\n" in now)
 st, c2 = cues(VI)
-check("vtt save: the cues read back with the new line last",
-      [q["text"] for q in c2["cues"]] == ["VTT line, fixed", "<i>Styled line, fixed</i>", "<v Anna>Anna speaks</v>\ntwo lines",
-                                          "Added VTT line"] and c2["cues"][3]["start"] == 10000, c2)
+check("vtt save: the cues read back with the new line second",
+      [q["text"] for q in c2["cues"]] == ["VTT line, fixed", "Added VTT line", "<i>Styled line, fixed</i>",
+                                          "<v Anna>Anna speaks</v>\ntwo lines"] and c2["cues"][1]["start"] == 2000, c2)
 vtt_backups = [b for b in backups() if b.endswith(".vtt")]
 check("vtt save: the original and a restore point are backed up with a .vtt extension",
       any(b.endswith("_original.vtt") for b in vtt_backups) and any(b.endswith("_restore.vtt") for b in vtt_backups)
@@ -262,23 +266,24 @@ H = c["hash"]
 drawing = c["cues"][3]["text"]
 refused("ass: editing a drawing -> 400 InvalidEdit", AI, {"baseHash": H, "edits": [edit(4, drawing, "x")]}, 400, "InvalidEdit")
 refused("ass: a control character -> 400 InvalidEdit", AI, {"baseHash": H, "edits": [edit(1, "Plain ASS line", "a\u0007b")]}, 400, "InvalidEdit")
-refused("ass: an added line past 60 s -> 400 InvalidEdit", AI, {"baseHash": H, "edits": [add("late", 59000, 61000, "x")]}, 400, "InvalidEdit")
+refused("ass: an added line past the end of the video -> 400 InvalidEdit", AI,
+        {"baseHash": H, "edits": [add("late", RUNTIME_MS - 500, RUNTIME_MS + 500, "x")]}, 400, "InvalidEdit")
 check("ass: the refusals changed nothing", read_file(ASS_NAME) == ASS)
 
 st, r = call("POST", sub(EP3, AI, "Edits"), {"baseHash": H, "edits": [
     edit(2, "{\\an8\\c&H00FFFF&}Top sign, with a comma", "{\\an8\\c&H00FFFF&}Top sign, fixed"),
     edit(3, "Two lines\nin one cue", "Two lines\nin one cue\n\nand a gap"),
-    add("a1", 2504, 4006, "Added, with a comma\nand a break")]})
+    add("a1", 2504, 2906, "Added, with a comma\nand a break")]})
 want = (ASS.replace(b"}Top sign, with a comma\r\n", b"}Top sign, fixed\r\n")
         .replace(b",,Two lines\\Nin one cue\r\n", b",,Two lines\\Nin one cue\\N\\Nand a gap\r\n")
         .replace(b",,Plain ASS line\r\n",
-                 b",,Plain ASS line\r\nDialogue: 0,0:00:02.50,0:00:04.01,Default,,0,0,0,,Added, with a comma\\Nand a break\r\n"))
+                 b",,Plain ASS line\r\nDialogue: 0,0:00:02.50,0:00:02.91,Default,,0,0,0,,Added, with a comma\\Nand a break\r\n"))
 now = read_file(ASS_NAME)
 check("ass save: 200, only the Text fields change, the BOM and CRLF are kept, the new line follows the one before it "
       "with its fields and rounded times (exact bytes)", st == 200 and now == want and r["hash"] == sha(want), (st, r, now[-300:]))
 st, c2 = cues(AI)
-check("ass save: the new line reads back at 2.50-4.01 s, between lines 1 and 2",
-      st == 200 and [(q["start"], q["end"], q["text"]) for q in c2["cues"]][1] == (2500, 4010, "Added, with a comma\nand a break")
+check("ass save: the new line reads back at 2.50-2.91 s, between lines 1 and 2",
+      st == 200 and [(q["start"], q["end"], q["text"]) for q in c2["cues"]][1] == (2500, 2910, "Added, with a comma\nand a break")
       and len(c2["cues"]) == 5, c2)
 check("ass save: the original is backed up with an .ass extension, byte for byte",
       any(b.endswith("_original.ass") for b in backups()), backups())

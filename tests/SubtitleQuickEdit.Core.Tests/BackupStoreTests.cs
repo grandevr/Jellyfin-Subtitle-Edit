@@ -95,12 +95,14 @@ public class BackupStoreTests
     [Fact]
     public void Saves_in_the_same_millisecond_still_keep_the_newest()
     {
-        // Many quick saves land in the same millisecond; the second name of a millisecond must still sort as newer.
+        // A stopped clock puts every save in the same millisecond (none is pruned: 50 are kept); each new name must
+        // still sort as the newest.
         using var dir = new TempDir();
         string folder = Path.Combine(dir.Root, "bk");
-        var store = new BackupStore(folder, BackupMode.OriginalPlusLastN, 2);
+        var now = new DateTime(2026, 10, 25, 9, 0, 0, DateTimeKind.Utc);
+        var store = new BackupStore(folder, BackupMode.OriginalPlusLastN, 50, () => now);
         store.BeforeSave(Item, 1, "/m/a.srt", Content.Srt("v0"));
-        for (int i = 1; i <= 200; i++)
+        for (int i = 1; i <= 30; i++)
         {
             store.BeforeSave(Item, 1, "/m/a.srt", Content.Srt("v" + i));
             string newest = Directory.GetFiles(folder, "*_save.srt").OrderBy(f => f, StringComparer.Ordinal).Last();
