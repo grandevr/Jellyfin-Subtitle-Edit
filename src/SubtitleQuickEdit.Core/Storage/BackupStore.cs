@@ -254,12 +254,36 @@ public sealed partial class BackupStore
 
     private string WriteNew(string key, string kind, string extension, byte[] content)
     {
+        string prefix = key + "_";
         string stamp = utcNow().ToString("yyyyMMdd'T'HHmmssfff'Z'", CultureInfo.InvariantCulture);
+
+        // The new name must sort after every kept one of its kind, since pruning keeps the last names in order: not
+        // only after a backup made earlier in the same millisecond, but also after one whose name pruning freed, and
+        // after one stamped later by a clock that has since gone back.
+        string? newest = Directory.EnumerateFiles(folder, prefix + "*_" + kind + extension)
+            .Select(f => Path.GetFileName(f))
+            .Max(StringComparer.Ordinal);
+        if (newest is not null && string.CompareOrdinal(newest, prefix.Length, stamp, 0, stamp.Length) > 0)
+        {
+            stamp = newest.Substring(prefix.Length, stamp.Length);
+        }
+
         for (int attempt = 0; ; attempt++)
         {
+            if (attempt > 99)
+            {
+                throw new IOException("Too many backups of one subtitle in the same millisecond.");
+            }
+
             // "~" sorts after "_", so a second backup in the same millisecond still sorts as the newer one.
             string suffix = attempt == 0 ? string.Empty : "~" + attempt.ToString("D2", CultureInfo.InvariantCulture);
-            string path = Path.Combine(folder, key + "_" + stamp + suffix + "_" + kind + extension);
+            string name = prefix + stamp + suffix + "_" + kind + extension;
+            if (newest is not null && string.CompareOrdinal(name, newest) <= 0)
+            {
+                continue;
+            }
+
+            string path = Path.Combine(folder, name);
             try
             {
                 // CreateNew: an existing backup, original or not, is never overwritten.
