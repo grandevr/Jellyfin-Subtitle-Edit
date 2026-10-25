@@ -66,6 +66,7 @@ also carries the template's StyleCop, Serilog and multithreading analyzers. **No
 either. The only project settings beyond the template are `AllowUnsafeBlocks` in Core (the `LibraryImport` P/Invoke
 stubs for `statx`, `chown`, `open`, `fsync`) and the `ExcludeAssets=runtime` on the Jellyfin packages that the template
 already has. The bump of the template to net10.0, Jellyfin 12.2.0 and targetAbi 12.2.0.0 needed no rule changes.
+Since 2026-10-25 the plugin builds against Jellyfin 12.3.0, the version of the live server.
 
 The test project uses the default analyzer set (not `AllEnabledByDefault`), since rules such as test-name underscores
 and per-call-site string allocations do not suit test code, and carries

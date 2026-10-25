@@ -19,6 +19,8 @@ Jellyfin or touched on the live Bazarr. All work is on a throwaway Jellyfin on t
 **Stage 0: facts about Jellyfin 12.2** (`STAGE0-NOTES.md`)
 - Runtime net10.0. Official plugin template is net9.0/10.11.5, so we use our own copy bumped to net10.0,
   Jellyfin.Controller/Model 12.2.0, targetAbi 12.2.0.0 (builds with no analyzer changes).
+  2026-10-25: bumped to Jellyfin.Controller/Model 12.3.0 to match the live server (12.3.0); the test server was
+  upgraded to the live image the same day.
 - File Transformation 3.0.2.0 has a 12.2 build and loads on the test server.
 - External `.srt` files are read from disk on every request: no server cache, no refresh needed after an edit.
   The web client loads text subtitles with `fetch(.../Stream.js)`. A refresh is only needed for added or removed files.
