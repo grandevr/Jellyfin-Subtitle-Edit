@@ -665,7 +665,8 @@
     /** What a staging note says: shown in the player, unless the player draws the subtitle itself (ASS). */
     function stagedNote(what) {
         return subtitleRenderer() === 'none'
-            ? what + '. Save writes it to the file, and Reload subtitles then shows it.'
+            ? what + '. The player draws ASS subtitles itself, so it keeps showing the old text for now: Save, then ' +
+                'Reload subtitles, to see the change.'
             : what + ' and shown in the player. Save writes it to the file.';
     }
 
@@ -1563,7 +1564,8 @@
                 model.setCues(loaded.cues, loaded.hash);
                 if (state.panel === panel) {
                     setBusy(false);
-                    reshow('Saved ' + prepared.rowIds.length + ' change' + (prepared.rowIds.length === 1 ? '' : 's') + '.');
+                    reshow('Saved ' + prepared.rowIds.length + ' change' + (prepared.rowIds.length === 1 ? '' : 's') + '.' +
+                        (subtitleRenderer() === 'none' ? ' Reload subtitles shows it in the player.' : ''));
                 }
             });
         }, function (err) {
