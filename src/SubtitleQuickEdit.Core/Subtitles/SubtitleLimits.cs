@@ -8,7 +8,7 @@ public static class SubtitleLimits
     /// <summary>
     /// Files larger than this are not editable.
     /// </summary>
-    public const int MaxFileBytes = 8 * 1024 * 1024;
+    public const int MaxFileBytes = 32 * 1024 * 1024;
 
     /// <summary>
     /// The shortest cue the editor accepts, in milliseconds.

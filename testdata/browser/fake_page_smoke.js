@@ -576,7 +576,8 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   checks['embedded: the panel names the copy and its lines, and edits nothing yet'] =
     (await e1.$eval('.sqe-title', (x) => x.textContent)) === 'Make this subtitle editable' &&
     (await e1.$eval('.sqe-extract-what', (x) => x.textContent)).indexOf('\u201cEp.en.srt\u201d (2 lines)') >= 0 &&
-    !(await e1.$('.sqe-cue-text')) && await e1.$eval('.sqe-actions', (x) => x.hidden);
+    !(await e1.$('.sqe-cue-text')) && await e1.$eval('.sqe-actions', (x) => x.hidden && x.offsetParent === null) &&
+    await e1.$eval('.sqe-nav', (x) => x.offsetParent === null);
   await e1.keyboard.press('Control+s');
   checks['embedded: Ctrl+S does not make a copy'] = (await e1.evaluate(() => window.fakeExtractSent.length)) === 0;
   await e1.click('.sqe-make');
