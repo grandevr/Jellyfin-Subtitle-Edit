@@ -6,6 +6,15 @@
     "overview": "Edit .srt, .vtt and .ass subtitles while you watch",
     "owner": "grandevr",
     "category": "Subtitles",
-    "versions": []
+    "versions": [
+      {
+        "version": "1.2.2.0",
+        "changelog": "- The panel says plainly that the player draws ASS subtitles itself, so a change shows after Save and Reload subtitles.",
+        "targetAbi": "12.3.0.0",
+        "sourceUrl": "https://github.com/grandevr/Jellyfin-Subtitle-Edit/releases/download/v1.2.2.0/subtitle-editor_1.2.2.0.zip",
+        "checksum": "5ad8a6f4475d6dd99105286f4d381561",
+        "timestamp": "2026-10-25T15:18:25Z"
+      }
+    ]
   }
 ]
