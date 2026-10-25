@@ -14,6 +14,8 @@ const ORIGIN = 'http://sqe-fake.test';
 const fake = `
 window.jfKeys = [];
 const CUSTOM = location.search.indexOf('custom=1') >= 0; // jellyfin-web's custom subtitle renderer instead of a text track
+const ROLE = (location.search.match(/role=(\\w+)/) || [])[1] || 'admin'; // admin, submitter or none
+window.fakeSubs = [];
 window.fakeEvents = null;
 function renderCustom() { // jellyfin-web's updateSubtitleText: the first cue that covers the time, or hidden
   const inner = document.querySelector('.videoSubtitlesInner'); const v = document.querySelector('video');
@@ -53,6 +55,10 @@ setTimeout(() => {
     'Sessions': () => [{ Id: 's1', NowPlayingItem: { Id: 'abc', RunTimeTicks: 600000000 }, PlayState: { MediaSourceId: 'abc', SubtitleStreamIndex: 0 } }],
     'SubtitleQuickEdit/Items/abc/Subtitles': () => [{ streamIndex: 0, external: true, format: 'srt', editable: true }],
     'SubtitleQuickEdit/Items/abc/Subtitles/0/Cues': () => { const f = file(); return { hash: f.hash, encoding: 'utf-8', cues: f.cues }; },
+    // Jellyfin leaves null fields out: a non-admin's answer has no pendingReviews.
+    'SubtitleQuickEdit/Me': () => ROLE === 'admin' ? { isAdmin: true, canEdit: true, canSubmit: false, submissionsOn: true, pendingReviews: 2, maxNoteLength: 500 }
+      : { isAdmin: false, canEdit: false, canSubmit: ROLE === 'submitter', submissionsOn: true, maxNoteLength: 500 },
+    'SubtitleQuickEdit/Submissions/Mine': () => window.fakeSubs,
   };
   window.ApiClient = { getCurrentUserId: () => 'u1', getCurrentUser: () => Promise.resolve({ Policy: { IsAdministrator: true } }),
     isLoggedIn: () => true, accessToken: () => 't', deviceId: () => 'd', getUrl: (p) => p,
@@ -74,6 +80,22 @@ setTimeout(() => {
         f.n++; f.hash = 'h' + f.n; store(f);
         return Promise.resolve({ hash: f.hash, savedCueIndexes: body.edits.filter((e) => e.type === 'edit').map((e) => e.cueIndex),
           addedCues: added, writeMethod: 'Rename' });
+      }
+      if (o.url === 'SubtitleQuickEdit/Items/abc/Subtitles/0/Submissions') {
+        const f = file();
+        if (body.baseHash !== f.hash) { return refused(409, { code: 'FileChanged', message: 'changed', currentHash: f.hash }); }
+        const sub = { id: 's' + (window.fakeSubs.length + 1), itemId: 'abc', streamIndex: 0, created: new Date().toISOString(), state: 'Pending',
+          note: body.note || undefined, baseHash: body.baseHash, userName: 'u',
+          edits: body.edits.map((e) => Object.assign({ outcome: 'Pending', cueStart: e.cueIndex ? f.cues[e.cueIndex - 1].start : undefined }, e)) };
+        window.fakeSubs.push(sub);
+        return Promise.resolve(copy(sub));
+      }
+      const withdraw = /^SubtitleQuickEdit\\/Submissions\\/(\\w+)\\/Withdraw$/.exec(o.url);
+      if (withdraw) {
+        const sub = window.fakeSubs.find((x) => x.id === withdraw[1]);
+        if (!sub || sub.state !== 'Pending') { return refused(409, { code: 'NotPending', message: 'no longer pending' }); }
+        sub.state = 'Withdrawn';
+        return Promise.resolve(copy(sub));
       }
       if (o.url === 'SubtitleQuickEdit/Items/abc/Subtitles/0/Restore') {
         window.fakeRestoreSent = body;
@@ -133,6 +155,10 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   const order = await p.evaluate(() => Array.from(document.querySelectorAll('.buttons button')).map((x) => x.className.split(' ')[0]));
   checks['button sits right after the subtitle button'] = order.join() === 'btnSubtitles,sqe-edit-button,btnFullscreen';
   checks['panel shows the cue at the current time'] = (await p.inputValue('.sqe-cue-text')) === 'Hello there';
+  await p.waitForFunction(() => { const a = document.querySelector('.sqe-pending'); return a && !a.hidden; }, null, { timeout: 3000 }).catch(() => null);
+  checks['admin: the panel links to the 2 submissions waiting for review'] =
+    (await p.$eval('.sqe-pending', (a) => !a.hidden && a.textContent)) === '2 submissions are waiting for your review';
+  checks['admin: no Submit button or note box'] = !(await p.$('.sqe-submit')) && !(await p.$('.sqe-note'));
   checks['the text box has focus'] = (await p.evaluate(() => document.activeElement.className)) === 'sqe-cue-text';
   await p.keyboard.type(' f k');
   await p.keyboard.press('ArrowLeft');
@@ -365,6 +391,61 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   checks['custom renderer: a staged new line shows on screen at its time'] = (await shown()) === 'Gap line';
   info.custom = { c1, c2, reloadStatus };
   await q.close();
+
+  // A user who may only submit: same editing, but Submit for review instead of Save, and their own submissions.
+  const r = await b.newPage();
+  await r.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  r.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
+  r.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+  r.on('dialog', (d) => d.accept());
+  await r.goto(ORIGIN + '/web/index.html?role=submitter');
+  await r.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  checks['submitter: the button says Suggest a subtitle fix'] = (await r.getAttribute('.sqe-edit-button', 'title')) === 'Suggest a subtitle fix';
+  await r.click('.sqe-edit-button');
+  await r.waitForSelector('.sqe-cue-text', { timeout: 5000 });
+  checks['submitter: Submit for review and a note box, no Save, Reload, Revert or pending link'] =
+    (await r.$eval('.sqe-title', (e) => e.textContent)) === 'Suggest a subtitle fix' && Boolean(await r.$('.sqe-submit')) &&
+    Boolean(await r.$('.sqe-note')) && !(await r.$('.sqe-save')) && !(await r.$('.sqe-reload')) && !(await r.$('.sqe-revert')) &&
+    (await r.$eval('.sqe-pending', (a) => a.hidden));
+  const rTrack = () => r.evaluate(() => Array.from(Array.from(document.querySelector('video').textTracks).find((t) => t.label === 'manualTrack').cues)
+    .map((c) => c.text.replace(/[\u200e\u200f]/g, '')).join('|'));
+  await r.fill('.sqe-cue-text', 'Hello suggested');
+  await r.click('.sqe-apply');
+  checks['submitter: a staged change shows in the player'] = (await rTrack()).split('|')[0] === 'Hello suggested';
+  await r.fill('.sqe-note', 'Typo in the first line');
+  await r.keyboard.press('Control+s');
+  await r.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Submitted') === 0, null, { timeout: 5000 });
+  const subs = await r.evaluate(() => window.fakeSubs);
+  checks['submitter: Ctrl+S submits the change with the note and the base hash'] = subs.length === 1 && subs[0].note === 'Typo in the first line' &&
+    subs[0].baseHash === 'h0' && subs[0].edits.length === 1 && subs[0].edits[0].newText === 'Hello suggested';
+  checks['submitter: the file is not changed and the player shows its text again'] =
+    (await r.evaluate(() => file().cues[0].text)) === 'Hello there' && (await rTrack()).split('|')[0] === 'Hello there';
+  checks['submitter: the submitted change leaves the list and the note box is cleared'] =
+    (await r.$$('.sqe-change')).length === 0 && (await r.inputValue('.sqe-note')) === '';
+  await r.waitForSelector('.sqe-mine-item', { timeout: 3000 });
+  checks['submitter: the submission is listed as waiting for review, with a Withdraw button'] =
+    (await r.$eval('.sqe-mine-item .sqe-badge', (e) => e.textContent)) === 'waiting for review' && Boolean(await r.$('.sqe-withdraw')) &&
+    (await r.$eval('.sqe-mine-item', (e) => e.textContent.indexOf('Hello suggested') >= 0 && e.textContent.indexOf('Typo in the first line') >= 0));
+  await r.click('.sqe-withdraw');
+  await r.waitForFunction(() => { const e = document.querySelector('.sqe-mine-item .sqe-badge'); return e && e.textContent === 'withdrawn'; }, null, { timeout: 3000 });
+  checks['submitter: Withdraw takes it back and the button goes away'] = !(await r.$('.sqe-withdraw')) &&
+    (await r.evaluate(() => window.fakeSubs[0].state)) === 'Withdrawn';
+  await r.evaluate(() => window.fakeExternalChange());
+  await r.fill('.sqe-cue-text', 'Hello late');
+  await r.click('.sqe-apply');
+  await r.click('.sqe-submit');
+  await r.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('The file changed') === 0, null, { timeout: 5000 });
+  checks['submitter: a file changed on disk submits nothing and keeps the matching change staged'] =
+    (await r.evaluate(() => window.fakeSubs.length)) === 1 && (await r.$$eval(".sqe-change .sqe-badge", (e) => e.map((x) => x.textContent))).join() === "staged";
+  await r.close();
+  const n = await b.newPage();
+  await n.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  n.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+  await n.goto(ORIGIN + '/web/index.html?role=none');
+  await n.waitForTimeout(2500);
+  checks['no rights: no button, and the client knows it'] = !(await n.$('.sqe-edit-button')) &&
+    (await n.evaluate(() => window.SubtitleQuickEdit.debugState().mode)) === null;
+  await n.close();
 
   checks['no errors in the console'] = logs.every((l) => !/^(error|pageerror)/.test(l));
 

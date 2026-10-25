@@ -715,6 +715,19 @@
             return before - this.rows.length;
         }
 
+        /**
+         * Applies a successful submission: the rows that were sent leave the list (they wait for an admin now, and the
+         * file is unchanged). Returns how many left.
+         */
+        applySubmitSuccess(rowIds) {
+            const sent = new Set(rowIds);
+            const before = this.rows.length;
+            this.rows = this.rows.filter(function (r) {
+                return !sent.has(r.rowId);
+            });
+            return before - this.rows.length;
+        }
+
         /** Forgets every row, saved or not (after "Revert to original"). Returns how many. */
         clear() {
             const count = this.rows.length;
@@ -796,6 +809,51 @@
             });
             return summary;
         }
+    }
+
+    // ---- who may do what, and submissions ----------------------------------------------------------------------
+
+    /**
+     * The editor mode for the server's Me answer: 'edit' (save directly: admins and users allowed to edit), 'submit'
+     * (send changes for an admin's review) or null (no editor). Jellyfin leaves null fields out of its answers, so
+     * only an explicit true counts.
+     */
+    function editorMode(me) {
+        if (!me || typeof me !== 'object') {
+            return null;
+        }
+
+        if (me.canEdit === true) {
+            return 'edit';
+        }
+
+        return me.canSubmit === true ? 'submit' : null;
+    }
+
+    const SUBMISSION_STATES = {
+        Pending: 'waiting for review',
+        Approved: 'approved',
+        PartlyApproved: 'partly approved',
+        Rejected: 'rejected',
+        Withdrawn: 'withdrawn',
+    };
+
+    /** A submission's state in words, for the list of the user's submissions. */
+    function submissionStateLabel(state) {
+        return Object.prototype.hasOwnProperty.call(SUBMISSION_STATES, state) ? SUBMISSION_STATES[state] : String(state || '').toLowerCase();
+    }
+
+    /**
+     * The submissions of one subtitle (item and stream), newest first. Ids are compared without dashes and case, as
+     * Jellyfin writes them both ways.
+     */
+    function submissionsFor(list, itemId, streamIndex) {
+        const want = String(itemId || '').replace(/-/g, '').toLowerCase();
+        return (Array.isArray(list) ? list : []).filter(function (s) {
+            return s && String(s.itemId || '').replace(/-/g, '').toLowerCase() === want && s.streamIndex === streamIndex;
+        }).sort(function (a, b) {
+            return String(b.created || '').localeCompare(String(a.created || ''));
+        });
     }
 
     // ---- drafts in localStorage -------------------------------------------------------------------------------
@@ -1029,6 +1087,9 @@
         shiftPosition: shiftPosition,
         locateCue: locateCue,
         StagingModel: StagingModel,
+        editorMode: editorMode,
+        submissionStateLabel: submissionStateLabel,
+        submissionsFor: submissionsFor,
         draftKey: draftKey,
         createDraftStore: createDraftStore,
         waitForApiClient: waitForApiClient,

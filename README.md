@@ -55,10 +55,11 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
   submitting, withdrawing, approving (also after the file changed, with conflicts and in part) and rejecting. It uses
   `testuser` (sees the library) and `limiteduser` (does not), and puts the settings back to the defaults at the end.
 - `devtools/mutation_check.py` breaks the code in scratch copies (17 ways) and requires the unit tests to fail for each break. Last run: control passed, 17 of 17 killed.
-- Client, no server needed: `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js` (158 tests),
-  `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` (38 of 38 killed), and with Playwright for
-  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (35 checks against a fake jellyfin-web page).
-- Client against the test server: `testdata/browser/stage3_tests.py` (see its header). It needs the TestWebm library and
+- Client, no server needed: `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js` (166 tests),
+  `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` (43 of 43 killed), and with Playwright for
+  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (66 checks against a fake jellyfin-web page, as admin, submitter and a user without rights).
+- Client against the test server: `testdata/browser/stage3_tests.py` (see its header; also the stage 4 user modes, which
+  change the plugin settings and put the defaults back). It needs the TestWebm library and
   changes test subtitles: TestWebm 01 is restored through the API; run `testdata/reset_webm03_srt.sh` in the test
   container before and after, because the API cannot remove the line it adds to TestWebm 03.
 
@@ -139,8 +140,9 @@ Requires the File Transformation plugin (3.0.2.0 or later). At startup the plugi
 `index.html` that adds one script tag and one stylesheet link, served anonymously from `/SubtitleQuickEdit/Client/`.
 If File Transformation is missing the server API still works and the log says why there is no button.
 
-For an administrator playing an item whose active subtitle is an editable external `.srt`, an edit button appears next
-to the subtitle button. It pauses the video and opens a panel (a side panel on desktop, a bottom sheet under 600 px):
+For a user who may edit (admins, and users "Allow user edits" lets in) or submit (other users, when "Allow user
+submissions" is on), playing an item whose active subtitle is an editable external `.srt`, an edit button appears next
+to the subtitle button. The client asks `GET Me` which of the two it is. It pauses the video and opens a panel (a side panel on desktop, a bottom sheet under 600 px):
 
 - one text box per line on screen (or the nearest line), with Previous/Next to step and seek;
 - **Apply** (Ctrl+Enter) stages changes; **Save** (Ctrl+S) writes everything staged in one request; **Reload subtitles**
@@ -149,6 +151,12 @@ to the subtitle button. It pauses the video and opens a panel (a side panel on d
 - "Changes this session" lists each change with its status (staged, saved, failed), Undo, and click to jump to it;
 - unsaved changes survive a page reload (`localStorage`, per user, item and track); Esc closes the panel, and keys typed
   in the panel never reach the player.
+
+Users who submit get the same panel titled "Suggest a subtitle fix", with **Submit for review** (Ctrl+S) and an
+optional note for the admin instead of Save, Reload and Revert. Submitted changes leave the list (the file is not
+changed); "Your submissions for this subtitle" lists them with their state, the admin's reason for a rejection, and
+Withdraw while they are pending. Admins see a link "N submissions are waiting for your review" at the top of the panel,
+to the plugin's settings page.
 
 If the file changed on disk since it was loaded, Save writes nothing: changes that still match stay staged, the rest
 are marked failed. `window.SubtitleQuickEdit.debugState()` shows the client's state (no tokens) for troubleshooting.
