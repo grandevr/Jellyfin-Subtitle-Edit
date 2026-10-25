@@ -15,7 +15,7 @@ import urllib.request
 
 base = sys.argv[1].rstrip("/")
 sdir = sys.argv[2]
-AUTH = 'MediaBrowser Client="bootstrap", Device="ct111", DeviceId="stage0-bootstrap", Version="1.0"'
+AUTH = 'MediaBrowser Client="bootstrap", Device="sqe-tests", DeviceId="stage0-bootstrap", Version="1.0"'
 
 
 def call(method, path, body=None, token=None):

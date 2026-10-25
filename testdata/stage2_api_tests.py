@@ -44,7 +44,7 @@ def call(method, path, body=None, tok=ADMIN, raw=None, ctype="application/json")
     req = urllib.request.Request(BASE + path, data=data, method=method)
     if data is not None:
         req.add_header("Content-Type", ctype)
-    auth = 'MediaBrowser Client="s2", Device="ct111", DeviceId="stage2-tests", Version="1.0"'
+    auth = 'MediaBrowser Client="s2", Device="sqe-tests", DeviceId="stage2-tests", Version="1.0"'
     if tok:
         auth += ', Token="%s"' % tok
     req.add_header("Authorization", auth)
@@ -329,7 +329,7 @@ def oversize_status():
     host_, port_ = BASE.replace("http://", "").split(":")
     body_head = b'{"baseHash":"' + b"x" * 65000
     head = ("POST %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: 1300000\r\n"
-            "Authorization: MediaBrowser Client=\"s2\", Device=\"ct111\", DeviceId=\"stage2-tests\", Version=\"1.0\", Token=\"%s\"\r\n\r\n"
+            "Authorization: MediaBrowser Client=\"s2\", Device=\"sqe-tests\", DeviceId=\"stage2-tests\", Version=\"1.0\", Token=\"%s\"\r\n\r\n"
             % (edits_url(EP[1], IDX), BASE.replace("http://", ""), ADMIN)).encode()
     sock = socket.create_connection((host_, int(port_)), timeout=30)
     try:

@@ -47,7 +47,7 @@ def call(method, path, body=None, tok=ADMIN):
     req = urllib.request.Request(BASE + path, data=data, method=method)
     if data is not None:
         req.add_header("Content-Type", "application/json")
-    auth = 'MediaBrowser Client="s5", Device="ct111", DeviceId="stage5-tests", Version="1.0"'
+    auth = 'MediaBrowser Client="s5", Device="sqe-tests", DeviceId="stage5-tests", Version="1.0"'
     if tok:
         auth += ', Token="%s"' % tok
     req.add_header("Authorization", auth)

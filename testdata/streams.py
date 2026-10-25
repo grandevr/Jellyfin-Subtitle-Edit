@@ -15,7 +15,7 @@ tok = open(os.path.join(sdir, "token")).read()
 
 def get(p):
     r = urllib.request.Request(BASE + p)
-    r.add_header("Authorization", 'MediaBrowser Client="api", Device="ct111", DeviceId="stage0-api", Version="1.0", Token="%s"' % tok)
+    r.add_header("Authorization", 'MediaBrowser Client="api", Device="sqe-tests", DeviceId="stage0-api", Version="1.0", Token="%s"' % tok)
     return json.load(urllib.request.urlopen(r, timeout=60))
 
 

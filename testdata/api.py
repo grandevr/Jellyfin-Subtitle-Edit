@@ -17,7 +17,7 @@ token = open(os.path.join(sdir, "token")).read()
 req = urllib.request.Request(BASE + path, data=body.encode() if body else None, method=method)
 req.add_header("Content-Type", "application/json")
 req.add_header("Authorization",
-               'MediaBrowser Client="api", Device="ct111", DeviceId="stage0-api", Version="1.0", Token="%s"' % token)
+               'MediaBrowser Client="api", Device="sqe-tests", DeviceId="stage0-api", Version="1.0", Token="%s"' % token)
 try:
     r = urllib.request.urlopen(req, timeout=60)
     status, hdrs, raw = r.status, r.headers, r.read()

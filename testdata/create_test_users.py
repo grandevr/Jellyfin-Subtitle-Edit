@@ -12,7 +12,7 @@ import urllib.request
 
 base = sys.argv[1].rstrip("/")
 sdir = sys.argv[2]
-HDR = 'MediaBrowser Client="users", Device="ct111", DeviceId="stage2-users", Version="1.0"'
+HDR = 'MediaBrowser Client="users", Device="sqe-tests", DeviceId="stage2-users", Version="1.0"'
 
 
 def call(method, path, body=None, token=None):

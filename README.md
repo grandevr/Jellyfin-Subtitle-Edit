@@ -39,7 +39,7 @@ settings from the environment (see `devtools/env.sh`; there are no defaults, a m
 
 | Variable | Meaning | Example |
 |---|---|---|
-| `SQE_HOST_EXEC` | Command prefix that runs a command string on the test host; it gets the whole quoted command as one last argument (stdin is passed through) | `ssh myhost`, `ssh myhost pct exec 103 --`, or `sh -c` for a local test server |
+| `SQE_HOST_EXEC` | Command prefix that runs a command string on the test host; it gets the whole quoted command as one last argument (stdin is passed through) | `ssh myhost`, `ssh myhost lxc-attach -n test --`, or `sh -c` for a local test server |
 | `SQE_TEST_ROOT` | Test server folder on that host, holding `config/`, `media/` and `src/` | `/srv/jellyfin-test` |
 | `JF_BASE` | Test server URL, used by `testdata/*.py` | `http://test-host:8097` |
 | `SQE_LOG_CMD` | Optional: command that prints the test container's last 2000 log lines to stdout, for `stage2_api_tests.py`, `stage4_api_tests.py` and `stage5_api_tests.py` (default: `docker logs --tail 2000 $SQE_CONTAINER` through `SQE_HOST_EXEC`). Split like a shell line, no pipes | `my-log-tool jellyfin-test 2000` |

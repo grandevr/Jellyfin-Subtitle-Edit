@@ -15,7 +15,7 @@ fmt = sys.argv[4] if len(sys.argv) > 4 else "vtt"
 tok = open(os.path.join(sdir, "token")).read()
 url = "%s/Videos/%s/%s/Subtitles/%s/0/Stream.%s" % (BASE, item, item, idx, fmt)
 req = urllib.request.Request(url)
-req.add_header("Authorization", 'MediaBrowser Client="api", Device="ct111", DeviceId="stage0-api", Version="1.0", Token="%s"' % tok)
+req.add_header("Authorization", 'MediaBrowser Client="api", Device="sqe-tests", DeviceId="stage0-api", Version="1.0", Token="%s"' % tok)
 try:
     r = urllib.request.urlopen(req, timeout=60)
     status, hdrs, raw = r.status, r.headers, r.read()
