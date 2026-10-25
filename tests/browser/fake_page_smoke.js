@@ -1,6 +1,6 @@
 // Browser smoke test of the client against a fake jellyfin-web page (mock ApiClient and server, OSD markup copied
 // from docs/client-notes.md). Needs no Jellyfin server, only Playwright for Node and its Chromium:
-//   node testdata/browser/fake_page_smoke.js   (with Playwright on NODE_PATH)
+//   node tests/browser/fake_page_smoke.js   (with Playwright on NODE_PATH)
 // It catches browser-only problems that the Node unit tests cannot (for example "Illegal invocation" from timers).
 // The page is served from a fake origin so that localStorage and page reloads work like on a real server.
 const { chromium } = require('playwright');

@@ -1,0 +1,28 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['manifest.json', '**.md']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build
+        run: dotnet build SubtitleQuickEdit.slnx -c Release
+      - name: Unit tests
+        run: dotnet test SubtitleQuickEdit.slnx -c Release --no-build
+      - name: Client tests
+        run: node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js

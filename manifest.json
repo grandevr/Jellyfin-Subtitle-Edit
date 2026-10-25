@@ -1,0 +1,11 @@
+[
+  {
+    "guid": "b3b6f2a4-6f0e-4d5c-9a0c-5e2f6c1d7a31",
+    "name": "Subtitle Editor",
+    "description": "Fix subtitle lines from the web player: edit text, add lines with timings, with backups and optional user submissions.",
+    "overview": "Edit .srt, .vtt and .ass subtitles while you watch",
+    "owner": "grandevr",
+    "category": "Subtitles",
+    "versions": []
+  }
+]

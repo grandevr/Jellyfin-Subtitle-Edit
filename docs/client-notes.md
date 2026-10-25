@@ -191,7 +191,7 @@ video is 2), `MediaSourceId` = the item id, `NowPlayingItem.Id` = the item id, `
 
 ## Reload subtitles (stage 3d spike, used from 3e)
 
-`testdata/browser/reload_spike.py` changed one line on disk and tried three ways to make the paused player show it. All
+`testdata/browser/reload_spike.py` (on the `dev` branch) changed one line on disk and tried three ways to make the paused player show it. All
 three updated the on-screen text and kept the position and the pause:
 
 - A: `POST /Sessions/{id}/Command` with `{"Name":"SetSubtitleStreamIndex","Arguments":{"Index":"-1"}}`, 1.5 s later the
@@ -213,7 +213,7 @@ client's `apiPost` takes `noReply` for such calls. It also rejects (with the `Re
 
 ## Phone width (stage 3g)
 
-Checked in headless Chromium at 390x844 with touch (`stage3_tests.py`, `admin_phone`): the button shows in the OSD row,
+Checked in headless Chromium at 390x844 with touch (`stage3_tests.py` on the `dev` branch, `admin_phone`): the button shows in the OSD row,
 the panel is a full-width bottom sheet of at most 60 % of the height, so the video stays visible above it. Every panel
 button is at least 44 px high, the time fields of the new-line form fit on one row each, and nothing scrolls sideways.
 Taps work like clicks. The 44 px rule applies under 600 px or on a coarse pointer (touch screens of any size).
