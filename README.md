@@ -95,7 +95,7 @@ updates, a reinstall and a rollback:
 
 Uninstalling the plugin leaves this folder and every edited subtitle file in place.
 
-## How it works, briefly
+## How it works
 
 The browser sends an item id and a subtitle stream index, never a path; the server finds the file through Jellyfin's
 library. A save checks that the file still has the content the editor loaded (SHA-256), backs it up, splices only the
@@ -134,17 +134,6 @@ The plugin is `src/Jellyfin.Plugin.SubtitleQuickEdit/bin/Release/net10.0/Jellyfi
 
 The `dev` branch also holds the tooling for a throwaway Jellyfin test server: fixtures, API tests, browser tests
 against a real server, and mutation checks. See its README.
-
-## Releasing
-
-Bump the version in `Directory.Build.props`, add a section for it to [CHANGELOG.md](CHANGELOG.md), merge, then run the
-**Release** workflow (Actions → Release → Run workflow). It builds and tests, publishes the zip as a GitHub release,
-and adds the version with its checksum to `manifest.json`, which Jellyfin reads.
-
-## Name
-
-Up to 1.0 the plugin was called "Subtitle Quick Edit". Its internal name (`SubtitleQuickEdit`: assembly, plugin id,
-API routes, data folder) is unchanged so that settings, backups and submissions carry over.
 
 ## Licence
 
