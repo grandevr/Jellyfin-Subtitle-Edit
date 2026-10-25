@@ -385,6 +385,13 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   await p.focus('.sqe-cue-text');
   await p.keyboard.press('Escape');
   checks['Esc closed the panel'] = !(await p.$('.sqe-panel'));
+  // Subtitles off and on again by the player itself (no menu click, no DOM change): the button follows the text track.
+  const setMode = (m) => p.evaluate((mode) => { Array.from(document.querySelector('video').textTracks).find((t) => t.label === 'manualTrack').mode = mode; }, m);
+  await setMode('disabled');
+  const goneOff = await p.waitForFunction(() => !document.querySelector('.sqe-edit-button'), null, { timeout: 3000 }).then(() => true, () => false);
+  await setMode('showing');
+  const backOn = await p.waitForSelector('.sqe-edit-button', { timeout: 3000 }).then(() => true, () => false);
+  checks['the button goes when the text track is switched off and comes back when it is shown again'] = goneOff && backOn;
   // The custom subtitle renderer (a jellyfin-web user setting): no text track, jellyfin-web's own element instead.
   const q = await b.newPage();
   await q.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));

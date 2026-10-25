@@ -62,6 +62,7 @@
         resumeOnClose: false,
         preview: null, // the timer that pauses the video at the end of a new line's Preview
         showSavedText: false, // custom renderer: show the file's saved text until Reload subtitles (the player has the old)
+        trackShowing: null, // textTrackShowing() at the last refresh, to notice subtitles being switched on or off
     };
 
     // ---- small helpers -----------------------------------------------------------------------------------------------
@@ -2388,6 +2389,13 @@
             state.showSavedText = false;
             video.addEventListener('timeupdate', onVideoTime);
             video.addEventListener('seeked', onVideoTime);
+            if (video.textTracks && video.textTracks.addEventListener) {
+                // A track's mode changes without any DOM change: jellyfin-web keeps its one text track disabled while
+                // it fetches a newly chosen subtitle, then shows it.
+                video.textTracks.addEventListener('change', scheduleRefresh);
+                video.textTracks.addEventListener('addtrack', scheduleRefresh);
+            }
+            state.trackShowing = null;
             state.playbackSeq++;
             state.playbackStartedAt = now();
             state.session = null;
@@ -2403,6 +2411,16 @@
             state.sessionTried = true;
             loadSession(state.playbackSeq, 0);
             return;
+        }
+
+        const showing = textTrackShowing(video);
+        if (showing !== state.trackShowing) {
+            // Subtitles came on or went off after the menu click was handled (the click runs before jellyfin-web's).
+            state.trackShowing = showing;
+            if (state.session) {
+                evaluate();
+                return;
+            }
         }
 
         updateButton();
