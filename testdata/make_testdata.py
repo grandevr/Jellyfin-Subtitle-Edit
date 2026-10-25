@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the throwaway SRT test library for the Subtitle Quick Edit plugin.
+"""Generate the throwaway SRT test library for the Subtitle Editor plugin.
 
 Usage: make_testdata.py <output-dir>
 Creates <output-dir>/TestShow/Season 01/ with .srt files for two episodes in

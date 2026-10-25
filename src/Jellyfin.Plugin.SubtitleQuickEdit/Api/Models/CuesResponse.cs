@@ -22,6 +22,18 @@ public class CuesResponse
     public string Encoding { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the file's format: <c>srt</c>, <c>vtt</c> or <c>ass</c>.
+    /// </summary>
+    [JsonPropertyName("format")]
+    public string Format { get; set; } = "srt";
+
+    /// <summary>
+    /// Gets or sets how precisely the file stores times, in milliseconds: 1, or 10 for ASS/SSA.
+    /// </summary>
+    [JsonPropertyName("timePrecisionMs")]
+    public int TimePrecisionMs { get; set; } = 1;
+
+    /// <summary>
     /// Gets or sets the cues in file order.
     /// </summary>
     [JsonPropertyName("cues")]

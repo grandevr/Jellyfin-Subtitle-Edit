@@ -8,7 +8,7 @@ using SubtitleQuickEdit.Core.Subtitles;
 namespace SubtitleQuickEdit.Core.Editing;
 
 /// <summary>
-/// Saves edits to a subtitle file, applying the spec's save rules in order: the file must be an editable .srt; its
+/// Saves edits to a subtitle file, applying the spec's save rules in order: the file must be an editable .srt, .vtt, .ass or .ssa file; its
 /// hash must still be the client's base hash; every edit must be valid and match the file's current text; the
 /// original is backed up; the new content is written with <see cref="SafeFileWriter"/>. Jellyfin reads external
 /// .srt files on every request, so nothing needs refreshing afterwards.

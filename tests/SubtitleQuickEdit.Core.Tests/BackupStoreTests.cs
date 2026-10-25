@@ -93,6 +93,22 @@ public class BackupStoreTests
     }
 
     [Fact]
+    public void Saves_in_the_same_millisecond_still_keep_the_newest()
+    {
+        // Many quick saves land in the same millisecond; the second name of a millisecond must still sort as newer.
+        using var dir = new TempDir();
+        string folder = Path.Combine(dir.Root, "bk");
+        var store = new BackupStore(folder, BackupMode.OriginalPlusLastN, 2);
+        store.BeforeSave(Item, 1, "/m/a.srt", Content.Srt("v0"));
+        for (int i = 1; i <= 200; i++)
+        {
+            store.BeforeSave(Item, 1, "/m/a.srt", Content.Srt("v" + i));
+            string newest = Directory.GetFiles(folder, "*_save.srt").OrderBy(f => f, StringComparer.Ordinal).Last();
+            Assert.Equal(Content.Srt("v" + i), File.ReadAllBytes(newest));
+        }
+    }
+
+    [Fact]
     public void Each_item_stream_and_file_has_its_own_original()
     {
         using var dir = new TempDir();

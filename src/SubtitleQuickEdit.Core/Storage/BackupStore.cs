@@ -192,7 +192,8 @@ public sealed partial class BackupStore
         string stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmssfff'Z'", CultureInfo.InvariantCulture);
         for (int attempt = 0; ; attempt++)
         {
-            string suffix = attempt == 0 ? string.Empty : "-" + attempt.ToString(CultureInfo.InvariantCulture);
+            // "~" sorts after "_", so a second backup in the same millisecond still sorts as the newer one.
+            string suffix = attempt == 0 ? string.Empty : "~" + attempt.ToString("D2", CultureInfo.InvariantCulture);
             string path = Path.Combine(folder, key + "_" + stamp + suffix + "_" + kind + extension);
             try
             {

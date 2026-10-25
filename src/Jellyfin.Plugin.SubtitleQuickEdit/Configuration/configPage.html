@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Subtitle Quick Edit</title>
+    <title>Subtitle Editor</title>
 </head>
 <body>
     <div id="SubtitleQuickEditConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
@@ -28,7 +28,7 @@
         </style>
         <div data-role="content">
             <div class="content-primary">
-                <h2>Subtitle Quick Edit</h2>
+                <h2>Subtitle Editor</h2>
                 <form id="SubtitleQuickEditConfigForm">
                     <div class="selectContainer">
                         <label class="selectLabel" for="UserEdits">Allow user edits</label>
@@ -184,7 +184,7 @@
                         try {
                             renderUsers(results[1], config.UserEditUserIds);
                         } catch (err) {
-                            console.error('Subtitle Quick Edit: could not list the users', err);
+                            console.error('Subtitle Editor: could not list the users', err);
                         }
 
                         q('#AllowUserSubmissions').checked = config.AllowUserSubmissions;

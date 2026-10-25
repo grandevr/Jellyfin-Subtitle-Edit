@@ -1,5 +1,5 @@
 /*
- * Subtitle Quick Edit page code: the edit button in the player and the side panel.
+ * Subtitle Editor page code: the edit button in the player and the side panel.
  * Served after logic.js in the same file (see ClientAssetsController), so window.SqeLogic is already defined.
  * What jellyfin-web 12.2 looks like (selectors, load order, Sessions lag) is recorded in docs/client-notes.md.
  * Stage 3e: editing, Previous/Next, Apply, the "Changes this session" list, Save, Reload subtitles, conflicts
@@ -53,7 +53,7 @@
         menu: null, // { index, at }: the last subtitle choice made in the subtitle menu
         lastOsdButton: null, // { kind: 'subtitles' | 'other', at }
         tracks: {}, // itemId -> promise of the plugin's subtitle list
-        cues: {}, // 'itemId:streamIndex' -> { hash, encoding, cues }, fetched once per playback
+        cues: {}, // 'itemId:streamIndex' -> { hash, encoding, format, timePrecisionMs, cues }, fetched once per playback
         models: {}, // 'itemId:streamIndex' -> StagingModel with the staged changes, kept for the life of the page
         target: null, // { itemId, streamIndex, track } when the active track is editable, else null
         panel: null, // the open panel's elements, or null
@@ -424,6 +424,25 @@
         return window.localStorage;
     });
 
+    // "Show style tags" (ASS and WebVTT): off by default, remembered in this browser.
+    const SHOW_TAGS_KEY = 'sqe-show-style-tags';
+
+    function showTagsSetting() {
+        try {
+            return window.localStorage.getItem(SHOW_TAGS_KEY) === '1';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function rememberShowTags(on) {
+        try {
+            window.localStorage.setItem(SHOW_TAGS_KEY, on ? '1' : '0');
+        } catch (e) {
+            // Storage blocked: the toggle still works on this page.
+        }
+    }
+
     // ---- the session's original: what "Revert to original" puts back -------------------------------------------------
     // The hash of each track as it was the first time this browser tab loaded it. Kept in sessionStorage, so it lasts
     // through page reloads but not into a new tab; held in memory too, for when storage is blocked.
@@ -499,6 +518,7 @@
 
         const rows = model.snapshot();
         return {
+            format: loaded.format,
             cues: loaded.cues,
             edits: rows.filter(function (r) {
                 return r.type === 'edit' && r.status === 'staged';
@@ -543,7 +563,7 @@
 
             const edit = editFor(src, cue);
             if (edit || shown.sqeTouched) {
-                const want = edit ? edit.newText : cue.text;
+                const want = L.screenText(edit ? edit.newText : cue.text, src.format);
                 if (String(shown.text).replace(DIRECTION_MARKS, '') !== want) {
                     shown.text = want;
                 }
@@ -555,15 +575,16 @@
         src.adds.forEach(function (row) {
             wanted[row.clientId] = true;
             const existing = added[row.clientId];
+            const shownText = L.screenText(row.text, src.format);
             const already = (byStart[Math.round(row.startMs)] || []).some(function (c) {
-                return String(c.text).replace(DIRECTION_MARKS, '') === row.text;
+                return String(c.text).replace(DIRECTION_MARKS, '') === shownText;
             });
             if (existing) {
                 existing.startTime = row.startMs / 1000;
                 existing.endTime = row.endMs / 1000;
-                existing.text = row.text;
+                existing.text = shownText;
             } else if (!already) {
-                const cue = new window.VTTCue(row.startMs / 1000, row.endMs / 1000, row.text);
+                const cue = new window.VTTCue(row.startMs / 1000, row.endMs / 1000, shownText);
                 cue.sqeAdded = row.clientId;
                 track.addCue(cue);
             }
@@ -610,9 +631,16 @@
         if (text === null) {
             element.classList.add('hide');
         } else {
-            element.innerHTML = cueMarkup(text);
+            element.innerHTML = cueMarkup(L.screenText(text, src.format));
             element.classList.remove('hide');
         }
+    }
+
+    /** What a staging note says: shown in the player, unless the player draws the subtitle itself (ASS). */
+    function stagedNote(what) {
+        return subtitleRenderer() === 'none'
+            ? what + '. Save writes it to the file, and Reload subtitles then shows it.'
+            : what + ' and shown in the player. Save writes it to the file.';
     }
 
     function refreshOverlay() {
@@ -664,7 +692,13 @@
 
         return apiGet('SubtitleQuickEdit/Items/' + encodeURIComponent(target.itemId) + '/Subtitles/' + target.streamIndex + '/Cues')
             .then(function (body) {
-                const loaded = { hash: body.hash, encoding: body.encoding, cues: body.cues || [] };
+                const loaded = {
+                    hash: body.hash,
+                    encoding: body.encoding,
+                    format: body.format || 'srt',
+                    timePrecisionMs: body.timePrecisionMs || 1,
+                    cues: body.cues || [],
+                };
                 state.cues[key] = loaded;
                 rememberBaseline(target, loaded.hash);
                 return loaded;
@@ -680,7 +714,7 @@
         let model = state.models[key];
         let restored = null;
         if (!model) {
-            model = new L.StagingModel({ runtimeMs: state.session ? state.session.runtimeMs : null });
+            model = new L.StagingModel({ runtimeMs: state.session ? state.session.runtimeMs : null, format: loaded.format });
             const draft = drafts.load(state.userId, target.itemId, target.streamIndex);
             if (draft) {
                 const summary = model.restore(draft, loaded.cues, loaded.hash);
@@ -719,7 +753,7 @@
         const submitting = state.mode === 'submit';
         const root = el('aside', 'sqe-panel' + (submitting ? ' sqe-submit-mode' : ''));
         root.setAttribute('role', 'dialog');
-        root.setAttribute('aria-label', 'Subtitle Quick Edit');
+        root.setAttribute('aria-label', 'Subtitle Editor');
         const header = el('header', 'sqe-header');
         const title = el('h2', 'sqe-title', submitting ? 'Suggest a subtitle fix' : 'Edit subtitle line');
         const close = el('button', 'sqe-close', '×');
@@ -743,6 +777,18 @@
         nav.appendChild(button('sqe-next', 'Next ›', 'Next line', function () {
             step(1);
         }));
+        const tags = el('label', 'sqe-tags');
+        const tagsBox = el('input', 'sqe-tags-toggle');
+        tagsBox.type = 'checkbox';
+        tagsBox.checked = showTagsSetting();
+        tagsBox.addEventListener('change', function () {
+            rememberShowTags(tagsBox.checked);
+            toggleTags();
+        });
+        tags.appendChild(tagsBox);
+        tags.appendChild(document.createTextNode(' Show style tags'));
+        tags.title = 'Show and edit the styling codes in each line, such as {\\an8} or <i>';
+        tags.hidden = true;
         const cues = el('div', 'sqe-cues');
         const actions = el('div', 'sqe-actions');
         actions.appendChild(button('sqe-apply', 'Apply', 'Stage the change (Ctrl+Enter)', function () {
@@ -796,6 +842,7 @@
 
         root.appendChild(status);
         root.appendChild(nav);
+        root.appendChild(tags);
         root.appendChild(cues);
         root.appendChild(actions);
         root.appendChild(changes);
@@ -805,7 +852,8 @@
         changes.hidden = true;
         mine.hidden = true;
         return {
-            root: root, status: status, nav: nav, cues: cues, actions: actions, changes: changes, list: list, note: note,
+            root: root, status: status, nav: nav, tags: tags, tagsBox: tagsBox, cues: cues, actions: actions, changes: changes,
+            list: list, note: note,
             mine: mine, mineList: mineList, pending: pending, submitting: submitting, shown: [], form: null,
         };
     }
@@ -853,7 +901,16 @@
         })[0] || null;
     }
 
-    function renderCues(shown, note) {
+    /** True when the panel hides the style tags at the edges of each line (an ASS or WebVTT file, toggle off). */
+    function hidesTags(panel) {
+        return Boolean(panel.loaded && L.hasStyleTags(panel.loaded.format) && !panel.tagsBox.checked);
+    }
+
+    /**
+     * Shows cues with a text box each. pending (optional) maps a cue index to text to show instead of the staged or
+     * file text, so switching "Show style tags" keeps what was typed.
+     */
+    function renderCues(shown, note, pending) {
         const panel = state.panel;
         const box = panel.cues;
         box.textContent = '';
@@ -875,27 +932,64 @@
             const heading = el('div', 'sqe-cue-heading');
             heading.appendChild(el('span', 'sqe-cue-number', 'Line ' + cue.index));
             heading.appendChild(el('span', 'sqe-cue-time', L.formatTime(cue.start) + ' → ' + L.formatTime(cue.end)));
+            if (cue.style) {
+                heading.appendChild(el('span', 'sqe-cue-style', cue.style));
+            }
+
             if (row) {
                 heading.appendChild(el('span', 'sqe-badge sqe-badge-' + row.status, row.status));
             }
 
-            const value = row ? row.newText : cue.text;
+            const full = pending && pending[cue.index] !== undefined ? pending[cue.index] : (row ? row.newText : cue.text);
+            const parts = hidesTags(panel) ? L.splitStyleTags(full, panel.loaded.format) : { prefix: '', body: full, suffix: '' };
+            if (parts.prefix || parts.suffix) {
+                const styled = el('span', 'sqe-badge sqe-badge-styled', 'styled');
+                styled.title = 'This line has style tags, kept as they are. Turn on "Show style tags" to edit them.';
+                heading.appendChild(styled);
+            }
+
             const text = el('textarea', 'sqe-cue-text');
-            text.value = value;
-            text.rows = Math.max(2, value.split('\n').length);
+            text.value = parts.body;
+            text.rows = Math.max(2, parts.body.split('\n').length);
             text.setAttribute('aria-label', 'Text of line ' + cue.index);
+            item.sqeParts = parts;
             const error = el('p', 'sqe-field-error');
             error.hidden = true;
             item.appendChild(heading);
             item.appendChild(text);
+            if (cue.readOnly) {
+                text.readOnly = true;
+                item.appendChild(el('p', 'sqe-hint', 'This line is a drawing, so it cannot be edited here.'));
+            }
+
             item.appendChild(error);
             box.appendChild(item);
         });
         updateNav();
-        const first = box.querySelector('textarea');
+        const first = box.querySelector('textarea:not([readonly])');
         if (first) {
             first.focus();
         }
+    }
+
+    /** The full text a cue's box stands for: the hidden style tags put back around what is typed. */
+    function boxText(item) {
+        const parts = item.sqeParts || { prefix: '', suffix: '' };
+        return parts.prefix + item.querySelector('textarea').value + parts.suffix;
+    }
+
+    /** "Show style tags" changed: shows the boxes again in the other mode, keeping what was typed. */
+    function toggleTags() {
+        const panel = state.panel;
+        if (!panel || panel.form || !panel.shown || panel.shown.length === 0) {
+            return;
+        }
+
+        const pending = {};
+        panel.cues.querySelectorAll('.sqe-cue').forEach(function (item) {
+            pending[Number(item.getAttribute('data-cue-index'))] = boxText(item);
+        });
+        renderCues({ mode: 'active', cues: panel.shown }, '', pending);
     }
 
     function updateNav() {
@@ -958,16 +1052,20 @@
             })[0];
             const text = item.querySelector('textarea');
             const error = item.querySelector('.sqe-field-error');
-            if (!cue) {
+            if (!cue || cue.readOnly) {
                 return;
             }
 
+            const value = boxText(item);
             const row = stagedRowFor(panel.model, cue);
-            if (L.normalizeText(text.value) === (row ? row.newText : L.normalizeText(cue.text))) {
+            if (L.normalizeText(value) === (row ? row.newText : L.normalizeText(cue.text))) {
                 return; // unchanged since the last Apply
             }
 
-            const result = panel.model.stageEdit(cue, text.value);
+            const parts = item.sqeParts;
+            const result = parts && (parts.prefix || parts.suffix) && L.normalizeText(text.value).trim().length === 0
+                ? { ok: false, error: { message: 'A line must keep some text besides its style tags.' } }
+                : panel.model.stageEdit(cue, value);
             if (!result.ok) {
                 error.textContent = result.error.message;
                 error.hidden = false;
@@ -986,7 +1084,7 @@
         renderChanges();
         if (failed === 0) {
             renderCues({ mode: 'active', cues: panel.shown }, staged + removed === 0 ? 'Nothing changed.' :
-                (staged > 0 ? 'Staged and shown in the player. Save writes it to the file. ' : '') + (removed > 0 ? 'Back to the original text, so the change was dropped.' : ''));
+                (staged > 0 ? stagedNote('Staged') + ' ' : '') + (removed > 0 ? 'Back to the original text, so the change was dropped.' : ''));
         }
     }
 
@@ -1122,6 +1220,11 @@
         item.appendChild(textWrap);
         form.text = text;
         form.errors.text = textError;
+        if (panel.loaded.timePrecisionMs > 1) {
+            item.appendChild(el('p', 'sqe-hint', 'This file keeps times to ' + panel.loaded.timePrecisionMs +
+                ' ms, so the times are rounded to that when saved.'));
+        }
+
         form.warning = el('p', 'sqe-warning');
         form.warning.hidden = true;
         item.appendChild(form.warning);
@@ -1169,7 +1272,7 @@
         persist(panel.target, panel.model);
         renderChanges();
         renderCues(L.cueForTime(panel.loaded.cues, result.row.startMs),
-            form.clientId ? 'New line updated.' : 'New line staged and shown in the player. Save writes it to the file.');
+            form.clientId ? 'New line updated.' : stagedNote('New line staged'));
         return true;
     }
 
@@ -1289,7 +1392,7 @@
                     showCue(cue);
                 }
 
-                showStatus('The old text is staged and shown in the player. Save writes it to the file.');
+                showStatus(stagedNote('The old text is staged'));
             });
             item.appendChild(undoSaved);
         }
@@ -1652,14 +1755,14 @@
     }
 
     /** True when the player's text track holds each of these cues' text as the file has it now (direction marks aside). */
-    function trackMatches(track, cues) {
+    function trackMatches(track, cues, format) {
         if (!track || !track.cues) {
             return false;
         }
 
         const wanted = {};
         cues.forEach(function (c) {
-            wanted[Math.round(c.start) + ':' + c.text] = true;
+            wanted[Math.round(c.start) + ':' + L.screenText(c.text, format)] = true;
         });
         const strip = /[\u200e\u200f\u202a-\u202e]/g;
         let found = 0;
@@ -1674,12 +1777,12 @@
     }
 
     /** Fallback: puts the file's cues straight into the player's text track. */
-    function replaceTrackCues(track, cues) {
+    function replaceTrackCues(track, cues, format) {
         Array.prototype.slice.call(track.cues || []).forEach(function (c) {
             track.removeCue(c);
         });
         cues.forEach(function (c) {
-            track.addCue(new window.VTTCue(c.start / 1000, c.end / 1000, c.text));
+            track.addCue(new window.VTTCue(c.start / 1000, c.end / 1000, L.screenText(c.text, format)));
         });
     }
 
@@ -1727,7 +1830,13 @@
                     });
                     function wait() {
                         const renderer = subtitleRenderer();
-                        if (renderer === 'native' && trackMatches(manualTrack(state.video), check.length > 0 ? check : loaded.cues)) {
+                        if (renderer === 'native' && trackMatches(manualTrack(state.video), check.length > 0 ? check : loaded.cues, loaded.format)) {
+                            return true;
+                        }
+
+                        if (renderer === 'none' && loaded.format === 'ass' && now() >= settled) {
+                            // The player draws ASS itself (JASSUB, from the whole file): it has fetched the file again
+                            // once the subtitle is back on, and there is no text track to compare.
                             return true;
                         }
 
@@ -1765,7 +1874,7 @@
                         throw new Error('the player did not switch the subtitle back on. Choose it again in the subtitle menu.');
                     }
 
-                    replaceTrackCues(track, loaded.cues);
+                    replaceTrackCues(track, loaded.cues, loaded.format);
                 }
 
                 refreshOverlay(); // staged changes that are not saved yet stay on screen
@@ -1903,7 +2012,7 @@
             }
 
             if (!state.target) {
-                showStatus('The subtitle on screen cannot be edited here (only external .srt files can).', true);
+                showStatus('The subtitle on screen cannot be edited here (only external .srt, .vtt, .ass and .ssa files can).', true);
                 return null;
             }
 
@@ -1916,6 +2025,7 @@
                 const t = L.secondsToMs(state.video ? state.video.currentTime : 0);
                 state.panel.target = target;
                 state.panel.loaded = loaded;
+                state.panel.tags.hidden = !L.hasStyleTags(loaded.format);
                 const made = modelFor(target, loaded);
                 state.panel.model = made.model;
                 renderChanges();

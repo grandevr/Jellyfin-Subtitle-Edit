@@ -1,4 +1,4 @@
-# Subtitle Quick Edit: status (1.0 live since 2026-10-25; stage 5 = 1.1 in progress)
+# Subtitle Editor: status (1.0 live since 2026-10-25; stage 5 = 1.1 in progress)
 
 Spec: the "Jellyfin Subtitle Quick-Edit Plugin — Spec" doc (claude.ai artifact YP25tXFeL6JFKs3i32VdNx). Read it again
 before resuming: it is the source of truth and was updated after every stage. 1.0 (stages 0 to 4, main ff112ca) runs
@@ -121,7 +121,7 @@ Run `. devtools/env.sh` first (with the settings from `local.env`) so that `sqe_
 - Install the plugin on the TEST server: `DOCKER_FLAGS="-v $SQE_TEST_ROOT/config/data/plugins:/plugins" devtools/dotnet.sh build src/Jellyfin.Plugin.SubtitleQuickEdit -c Release --no-incremental -o /plugins/SubtitleQuickEdit_1.1.0.0` (first `rm -rf $SQE_TEST_ROOT/config/data/plugins/SubtitleQuickEdit_0.2.0.0`)
 - Restart the test server to load it: `sqe_host docker restart jellyfin-test`
 - API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>`
-- Mutation check (about 8 minutes): `python3 -I devtools/mutation_check.py` (needs `$SQE_TEST_ROOT/src/sqe-mut`, created with `sqe_host mkdir $SQE_TEST_ROOT/src/sqe-mut` and `sqe_host chown 1000:1000 $SQE_TEST_ROOT/src/sqe-mut`)
+- Mutation check (about 8 minutes): `python3 -I devtools/mutation_check.py`
 - Client tests (no server): `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js`, then
   `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` and, with Playwright for Node,
   `node testdata/browser/fake_page_smoke.js`

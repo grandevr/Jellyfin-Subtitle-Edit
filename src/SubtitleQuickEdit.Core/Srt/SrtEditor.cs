@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Text;
 using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Srt;
@@ -31,20 +30,11 @@ internal static class SrtEditor
             switch (edit)
             {
                 case SubtitleTextEdit te:
-                    ValidateTextEdit(doc, te, textEdits);
+                    CueRules.CheckTarget(doc.Cues, te, textEdits);
+                    CueRules.AcceptTextEdit(doc.Cues, te, NormalizeAndValidateText(te.NewText, te.CuePosition), textEdits);
                     break;
                 case SubtitleAddCue add:
-                    try
-                    {
-                        ValidateAdd(add, runtimeMs, clientIds);
-                        adds.Add((add, NormalizeAndValidateText(add.Text, null), adds.Count));
-                    }
-                    catch (SubtitleEditException ex) when (ex.Error == SubtitleEditError.InvalidEdit && ex.ClientId is null && !string.IsNullOrEmpty(add.ClientId))
-                    {
-                        // Name the added line, so the client can mark the right row.
-                        throw new SubtitleEditException(ex.Error, ex.Message, ex.CuePosition) { ClientId = add.ClientId };
-                    }
-
+                    adds.Add((add, CueRules.ForAdd(add, () => CheckAdd(add, runtimeMs, clientIds)), adds.Count));
                     break;
                 default:
                     throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "Unknown edit type.");
@@ -52,7 +42,7 @@ internal static class SrtEditor
         }
 
         string eol = doc.LineEnding;
-        var patches = new List<Patch>();
+        var patches = new List<BytePatch>();
 
         // Text replacements.
         foreach (KeyValuePair<int, (string Old, string New)> pair in textEdits)
@@ -66,14 +56,14 @@ internal static class SrtEditor
             CueLayout l = cue.Layout;
             if (l.TextEmpty)
             {
-                byte[] bytes = Encode(doc, l.TimeLineTerminated ? pair.Value.New + "\n" : "\n" + pair.Value.New, eol, pair.Key);
-                patches.Add(new Patch(doc.ByteOffset(l.TextStart), 0, bytes, 0));
+                byte[] bytes = ByteSplicer.Encode(doc.Encoding, l.TimeLineTerminated ? pair.Value.New + "\n" : "\n" + pair.Value.New, eol, pair.Key);
+                patches.Add(new BytePatch(doc.ByteOffset(l.TextStart), 0, bytes, 0));
             }
             else
             {
-                byte[] bytes = Encode(doc, pair.Value.New, eol, pair.Key);
+                byte[] bytes = ByteSplicer.Encode(doc.Encoding, pair.Value.New, eol, pair.Key);
                 int from = doc.ByteOffset(l.TextStart);
-                patches.Add(new Patch(from, doc.ByteOffset(l.TextEnd) - from, bytes, 0));
+                patches.Add(new BytePatch(from, doc.ByteOffset(l.TextEnd) - from, bytes, 0));
             }
         }
 
@@ -128,15 +118,15 @@ internal static class SrtEditor
                 {
                     CueLayout target = doc.Cues[k].Layout;
                     string inserted = (target.PrecededByBlankLine ? string.Empty : eol) + joined + eol + eol;
-                    patches.Add(new Patch(doc.ByteOffset(target.BlockStart), 0, Encode(doc, inserted, null, null), 1));
+                    patches.Add(new BytePatch(doc.ByteOffset(target.BlockStart), 0, ByteSplicer.Encode(doc.Encoding, inserted, null, null), 1));
                 }
                 else
                 {
                     int tail = doc.TailTerminators;
                     int prefix = Math.Max(0, 2 - tail);
                     int suffix = Math.Min(tail, 2);
-                    string inserted = Repeat(eol, prefix) + joined + Repeat(eol, suffix);
-                    patches.Add(new Patch(doc.Data.Length, 0, Encode(doc, inserted, null, null), 1));
+                    string inserted = ByteSplicer.Repeat(eol, prefix) + joined + ByteSplicer.Repeat(eol, suffix);
+                    patches.Add(new BytePatch(doc.Data.Length, 0, ByteSplicer.Encode(doc.Encoding, inserted, null, null), 1));
                 }
             }
 
@@ -157,16 +147,16 @@ internal static class SrtEditor
                 if (l.NumberStart >= 0)
                 {
                     int from = doc.ByteOffset(l.NumberStart);
-                    patches.Add(new Patch(from, doc.ByteOffset(l.NumberEnd) - from, Encode(doc, digits, null, null), 2));
+                    patches.Add(new BytePatch(from, doc.ByteOffset(l.NumberEnd) - from, ByteSplicer.Encode(doc.Encoding, digits, null, null), 2));
                 }
                 else
                 {
-                    patches.Add(new Patch(doc.ByteOffset(l.TimeLineStart), 0, Encode(doc, digits + eol, null, null), 2));
+                    patches.Add(new BytePatch(doc.ByteOffset(l.TimeLineStart), 0, ByteSplicer.Encode(doc.Encoding, digits + eol, null, null), 2));
                 }
             }
         }
 
-        byte[] content = Splice(doc, patches);
+        byte[] content = ByteSplicer.Splice(doc.Data, patches);
         Verify(doc, content, expected, adds.Count > 0);
 
         var edited = textEdits.Keys.OrderBy(p => p).Select(p => newPositionOfOriginal[p - 1]).ToList();
@@ -179,163 +169,23 @@ internal static class SrtEditor
     /// <param name="value">The text.</param>
     /// <param name="cuePosition">The cue position for messages, if any.</param>
     /// <returns>The text with <c>\n</c> breaks.</returns>
-    internal static string NormalizeAndValidateText(string value, int? cuePosition)
-    {
-        string text = SubtitleText.NormalizeBreaks(value);
-        if (text.Length == 0)
+    internal static string NormalizeAndValidateText(string value, int? cuePosition) =>
+        CueRules.NormalizeAndCheckText(value, cuePosition, (line, position) =>
         {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A cue must keep at least one character.", cuePosition);
-        }
-
-        foreach (string line in text.Split('\n'))
-        {
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                throw new SubtitleEditException(
-                    SubtitleEditError.InvalidEdit,
-                    "A cue's text must not contain empty lines: a blank line would end the cue.",
-                    cuePosition);
-            }
-
             if (SrtPatterns.TimeLine().IsMatch(line))
             {
                 throw new SubtitleEditException(
                     SubtitleEditError.InvalidEdit,
                     "A line of text must not look like a cue time line (hh:mm:ss,mmm --> hh:mm:ss,mmm).",
-                    cuePosition);
+                    position);
             }
+        });
 
-            foreach (char c in line)
-            {
-                if (c < ' ' && c != '\t')
-                {
-                    throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "The text contains a control character.", cuePosition);
-                }
-            }
-        }
-
-        return text;
-    }
-
-    private static void ValidateTextEdit(SrtDocument doc, SubtitleTextEdit edit, Dictionary<int, (string Old, string New)> seen)
+    // An added line's checks: times, then its text.
+    private static string CheckAdd(SubtitleAddCue add, long? runtimeMs, HashSet<string> clientIds)
     {
-        if (edit.CuePosition < 1 || edit.CuePosition > doc.Cues.Count)
-        {
-            throw new SubtitleEditException(
-                SubtitleEditError.CueNotFound,
-                string.Create(CultureInfo.InvariantCulture, $"Cue {edit.CuePosition} does not exist; the file has {doc.Cues.Count} cues."),
-                edit.CuePosition);
-        }
-
-        if (seen.ContainsKey(edit.CuePosition))
-        {
-            throw new SubtitleEditException(
-                SubtitleEditError.InvalidEdit,
-                string.Create(CultureInfo.InvariantCulture, $"Cue {edit.CuePosition} is edited more than once in the same request."),
-                edit.CuePosition);
-        }
-
-        string newText = NormalizeAndValidateText(edit.NewText, edit.CuePosition);
-        string oldText = SubtitleText.NormalizeBreaks(edit.OldText ?? string.Empty);
-        SubtitleCue cue = doc.Cues[edit.CuePosition - 1];
-        if (!string.Equals(oldText, cue.Text, StringComparison.Ordinal))
-        {
-            throw new SubtitleEditException(
-                SubtitleEditError.TextMismatch,
-                string.Create(CultureInfo.InvariantCulture, $"Cue {edit.CuePosition} has changed since it was loaded."),
-                edit.CuePosition);
-        }
-
-        seen[edit.CuePosition] = (cue.Text, newText);
-    }
-
-    private static void ValidateAdd(SubtitleAddCue add, long? runtimeMs, HashSet<string> clientIds)
-    {
-        if (string.IsNullOrEmpty(add.ClientId))
-        {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "An added line needs a client id.");
-        }
-
-        if (!clientIds.Add(add.ClientId))
-        {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "Two added lines share the client id '" + add.ClientId + "'.");
-        }
-
-        if (add.StartMs < 0)
-        {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line cannot start before 00:00:00,000.");
-        }
-
-        if (add.EndMs <= add.StartMs)
-        {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line must end after it starts.");
-        }
-
-        if (add.EndMs - add.StartMs < SubtitleLimits.MinCueDurationMs)
-        {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line must be at least 100 ms long.");
-        }
-
-        if (add.EndMs > SrtDocument.MaxTimeMs)
-        {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line ends after 99:59:59,999, which an .srt file cannot hold.");
-        }
-
-        if (runtimeMs.HasValue && add.EndMs > runtimeMs.Value)
-        {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line must not end after the end of the video.");
-        }
-    }
-
-    private static byte[] Encode(SrtDocument doc, string text, string? eol, int? cuePosition)
-    {
-        string withBreaks = eol is null ? text : text.Replace("\n", eol, StringComparison.Ordinal);
-        try
-        {
-            return doc.Encoding.Encoding.GetBytes(withBreaks);
-        }
-        catch (EncoderFallbackException ex)
-        {
-            string shown = ex.CharUnknownHigh != '\0'
-                ? string.Create(CultureInfo.InvariantCulture, $"U+{char.ConvertToUtf32(ex.CharUnknownHigh, ex.CharUnknownLow):X4}")
-                : string.Create(CultureInfo.InvariantCulture, $"'{ex.CharUnknown}' (U+{(int)ex.CharUnknown:X4})");
-            throw new SubtitleEditException(
-                SubtitleEditError.Unrepresentable,
-                $"The character {shown} cannot be stored in this file's {doc.Encoding.Name} encoding.",
-                cuePosition);
-        }
-    }
-
-    private static string Repeat(string value, int count)
-    {
-        if (count <= 0)
-        {
-            return string.Empty;
-        }
-
-        return count == 1 ? value : value + value;
-    }
-
-    private static byte[] Splice(SrtDocument doc, List<Patch> patches)
-    {
-        List<Patch> ordered = patches.OrderBy(p => p.Offset).ThenBy(p => p.Order).ToList();
-        ReadOnlySpan<byte> original = doc.Data;
-        using var output = new System.IO.MemoryStream(original.Length + 256);
-        int cursor = 0;
-        foreach (Patch patch in ordered)
-        {
-            if (patch.Offset < cursor)
-            {
-                throw new SubtitleEditException(SubtitleEditError.VerificationFailed, "Internal error: overlapping edits.");
-            }
-
-            output.Write(original[cursor..patch.Offset]);
-            output.Write(patch.Bytes);
-            cursor = patch.Offset + patch.Length;
-        }
-
-        output.Write(original[cursor..]);
-        return output.ToArray();
+        CueRules.CheckAdd(add, runtimeMs, clientIds, SrtDocument.MaxTimeMs, "A new line ends after 99:59:59,999, which an .srt file cannot hold.");
+        return NormalizeAndValidateText(add.Text, null);
     }
 
     private static void Verify(SrtDocument doc, byte[] content, List<(long Start, long End, string Text)> expected, bool renumbered)
@@ -379,6 +229,4 @@ internal static class SrtEditor
             }
         }
     }
-
-    private readonly record struct Patch(int Offset, int Length, byte[] Bytes, int Order);
 }

@@ -60,6 +60,12 @@ const MUTATIONS = [
     { name: 'applySubmitSuccess: removes every row', from: 'return !sent.has(r.rowId);', to: 'return false;' },
     { name: 'submissionsFor: ignores the stream', from: "=== want && s.streamIndex === streamIndex;", to: "=== want;" },
     { name: 'submissionsFor: oldest first', from: "return String(b.created || '').localeCompare(String(a.created || ''));", to: "return String(a.created || '').localeCompare(String(b.created || ''));" },
+    { name: 'validateCueText: ASS refuses blank lines too', from: "if (format !== 'ass' && line.trim().length === 0) {", to: "if (line.trim().length === 0) {" },
+    { name: 'validateCueText: WebVTT allows "-->"', from: "if (format === 'vtt' && line.indexOf('-->') >= 0) {", to: "if (false) {" },
+    { name: 'splitStyleTags: VTT closing tags hidden without an opening tag', from: "const t = prefix ? VTT_TRAILING_TAGS.exec(rest) : null;", to: "const t = VTT_TRAILING_TAGS.exec(rest);" },
+    { name: 'splitStyleTags: ASS keeps only the first block', from: "const ASS_LEADING_TAGS = /^(?:\\{[^}]*\\})+/;", to: "const ASS_LEADING_TAGS = /^\\{[^}]*\\}/;" },
+    { name: 'screenText: \\h left as is', from: ".replace(/\\\\h/g, ' ')", to: "" },
+    { name: 'hasStyleTags: not for WebVTT', from: "return format === 'ass' || format === 'vtt';", to: "return format === 'ass';" },
 ];
 
 function runTests(logicFile) {

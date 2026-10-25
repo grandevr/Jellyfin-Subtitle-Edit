@@ -32,6 +32,16 @@ public sealed class SubtitleCue
     public required string Text { get; init; }
 
     /// <summary>
+    /// Gets the cue's style name (ASS/SSA), or null when the format has none.
+    /// </summary>
+    public string? Style { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the cue's text cannot be edited (an ASS vector drawing).
+    /// </summary>
+    public bool ReadOnly { get; init; }
+
+    /// <summary>
     /// Gets where the cue sits in the decoded text. Internal: used to splice bytes.
     /// </summary>
     internal CueLayout Layout { get; init; }

@@ -5,7 +5,7 @@ Mutants are built with analyzers off (the strict analyzers reject deliberately b
 copy is built the same way first and must pass.
 
 Each mutant is a scratch copy of the project (never the real source), synced to
-$SQE_TEST_ROOT/src/sqe-mut on the test host and tested in the SDK container. A mutant is "killed" when
+$SQE_TEST_ROOT/src/sqe-mut on the test host (devtools/sync.sh creates it) and tested in the SDK container. A mutant is "killed" when
 `dotnet test` fails. Usage: python3 -I devtools/mutation_check.py
 """
 import os
@@ -25,7 +25,7 @@ MUTANTS = [
      "src/SubtitleQuickEdit.Core/Srt/SrtEditor.cs",
      "if (adds.Count > 0 && original.Number != ordinal)", "if (false)"),
     ("new text ignores the file's line ending",
-     "src/SubtitleQuickEdit.Core/Srt/SrtEditor.cs",
+     "src/SubtitleQuickEdit.Core/Subtitles/ByteSplicer.cs",
      'string withBreaks = eol is null ? text : text.Replace("\\n", eol, StringComparison.Ordinal);',
      "string withBreaks = text;"),
     ("post-edit self-check ignores cue text",
@@ -74,13 +74,44 @@ MUTANTS = [
     ("any file extension is taken for .srt",
      "src/SubtitleQuickEdit.Core/Subtitles/SubtitleFormats.cs",
      "        return null;\n", "        return SubtitleFormat.Srt;\n"),
-    ("formats without a parser count as editable",
+    ("ASS/SSA files are not editable",
      "src/SubtitleQuickEdit.Core/Subtitles/SubtitleFormats.cs",
-     "public static bool IsEditable(SubtitleFormat format) => format == SubtitleFormat.Srt;",
-     "public static bool IsEditable(SubtitleFormat format) => true;"),
+     "format is SubtitleFormat.Srt or SubtitleFormat.WebVtt or SubtitleFormat.Ass;",
+     "format is SubtitleFormat.Srt or SubtitleFormat.WebVtt;"),
+    ("a second backup in the same millisecond sorts as older",
+     "src/SubtitleQuickEdit.Core/Storage/BackupStore.cs",
+     'string suffix = attempt == 0 ? string.Empty : "~" + attempt.ToString("D2", CultureInfo.InvariantCulture);',
+     'string suffix = attempt == 0 ? string.Empty : "-" + attempt.ToString(CultureInfo.InvariantCulture);'),
     ("backups always get the .srt extension",
      "src/SubtitleQuickEdit.Core/Storage/BackupStore.cs",
      "return string.IsNullOrEmpty(extension) ? \".srt\" : extension;", "return \".srt\";"),
+    ("WebVTT text may contain an arrow",
+     "src/SubtitleQuickEdit.Core/Vtt/VttEditor.cs",
+     'if (line.Contains("-->", StringComparison.Ordinal))', "if (false)"),
+    ("WebVTT self-check ignores cue text",
+     "src/SubtitleQuickEdit.Core/Vtt/VttEditor.cs",
+     "|| !string.Equals(cue.Text, expected[i].Text, StringComparison.Ordinal))", ")"),
+    ("WebVTT payload swallows a following timing line",
+     "src/SubtitleQuickEdit.Core/Vtt/VttParser.cs",
+     "while (end < lines.Count && !IsBlank(decoded, lines[end]) && !IsTiming(decoded, lines[end], out _, out _))",
+     "while (end < lines.Count && !IsBlank(decoded, lines[end]))"),
+    ("ASS drawings are editable",
+     "src/SubtitleQuickEdit.Core/Ass/AssEditor.cs",
+     "if (doc.Cues[te.CuePosition - 1].ReadOnly)", "if (false)"),
+    ("ASS line breaks written as raw newlines",
+     "src/SubtitleQuickEdit.Core/Ass/AssDocument.cs",
+     'text.Replace("\\n", "\\\\N", StringComparison.Ordinal);', "text;"),
+    ("ASS added line keeps unrounded times",
+     "src/SubtitleQuickEdit.Core/Ass/AssDocument.cs",
+     "internal static long RoundTime(long ms) => (ms + 5) / 10 * 10;", "internal static long RoundTime(long ms) => ms;"),
+    ("ASS added line anchored by file order",
+     "src/SubtitleQuickEdit.Core/Ass/AssEditor.cs",
+     "if (doc.Cues[i].StartMs <= start && (anchor < 0 || doc.Cues[i].StartMs >= doc.Cues[anchor].StartMs))",
+     "if (doc.Cues[i].StartMs <= start)"),
+    ("WebVTT added cue not separated from the next block",
+     "src/SubtitleQuickEdit.Core/Vtt/VttEditor.cs",
+     "string inserted = (target.PrecededByBlankLine ? string.Empty : eol) + joined + eol + eol;",
+     "string inserted = (target.PrecededByBlankLine ? string.Empty : eol) + joined + eol;"),
 ]
 
 

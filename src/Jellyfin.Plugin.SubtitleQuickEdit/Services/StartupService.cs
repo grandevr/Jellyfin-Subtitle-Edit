@@ -26,13 +26,13 @@ public sealed class StartupService : IHostedService
     public Task StartAsync(CancellationToken cancellationToken)
     {
         logger.LogInformation(
-            "Subtitle Quick Edit started. Backups are kept in {BackupFolder}.",
+            "Subtitle Editor started. Backups are kept in {BackupFolder}.",
             Plugin.Instance?.BackupFolder ?? "(plugin not initialised)");
 
         string? notice = PlatformServices.Current.StartupNotice;
         if (notice is not null)
         {
-            logger.LogWarning("Subtitle Quick Edit: {Notice}", notice);
+            logger.LogWarning("Subtitle Editor: {Notice}", notice);
         }
 
         return Task.CompletedTask;

@@ -24,8 +24,22 @@ public class SrtTrackInspectorTests
     }
 
     [Theory]
-    [InlineData("movie.en.ass")]
-    [InlineData("movie.en.vtt")]
+    [InlineData("movie.en.vtt", "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n", SubtitleFormat.WebVtt)]
+    [InlineData("movie.en.ass", "[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello\n", SubtitleFormat.Ass)]
+    [InlineData("MOVIE.EN.SSA", "[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello\n", SubtitleFormat.Ass)]
+    public void Vtt_and_ass_files_are_editable_and_parsed(string name, string content, SubtitleFormat format)
+    {
+        using var dir = new TempDir();
+        string path = dir.Write(name, System.Text.Encoding.UTF8.GetBytes(content));
+
+        TrackInspection result = SubtitleTrackInspector.Inspect(path);
+
+        Assert.True(result.Editable, result.Reason);
+        Assert.Equal(format, result.Document!.Format);
+        Assert.Equal("Hello", Assert.Single(result.Document.Cues).Text);
+    }
+
+    [Theory]
     [InlineData("movie.en.sub")]
     [InlineData("movie.srt.bak")]
     public void Other_formats_are_not_editable_and_say_so(string name)

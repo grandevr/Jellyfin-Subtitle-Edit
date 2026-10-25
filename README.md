@@ -1,7 +1,9 @@
-# Subtitle Quick Edit
+# Subtitle Editor
 
 A Jellyfin 12.3 plugin that edits the text of the subtitle line on screen (or adds a new line) in external `.srt`
-files (WebVTT and ASS/SSA are being added for 1.1). Spec: the "Jellyfin Subtitle Quick-Edit Plugin — Spec" doc. Licence: GPL-3.0 (see `LICENSE`).
+files, and from 1.1 also WebVTT (`.vtt`) and ASS/SSA (`.ass`, `.ssa`). Until 1.0 it was called "Subtitle Quick Edit"; the
+internal name (`SubtitleQuickEdit`: assembly, API routes, data and plugin folders) is unchanged so settings, backups and
+submissions carry over. Spec: the "Jellyfin Subtitle Quick-Edit Plugin — Spec" doc. Licence: GPL-3.0 (see `LICENSE`).
 
 Status: **1.0 is live**; 1.1 (WebVTT and ASS/SSA editing, stage 5) is in progress.
 
@@ -24,8 +26,8 @@ folder name (`SubtitleQuickEdit_1.1.0.0`), so an update removes the old versione
 | `src/Jellyfin.Plugin.SubtitleQuickEdit` | The plugin: controller, settings page, item/stream resolver, startup logging, File Transformation registration |
 | `src/Jellyfin.Plugin.SubtitleQuickEdit/Client` | The web player script: `logic.js` (page-free logic, Node-tested in `test/`), `quickedit.js` (button and panel), `quickedit.css` |
 | `tests/SubtitleQuickEdit.Core.Tests` | xUnit tests of the core |
-| `testdata/` | Scripts for the throwaway Jellyfin test server: fixtures, users, `stage2_api_tests.py`, `stage4_api_tests.py`, the TestWebm library (`make_webm.sh`, `reset_webm03_srt.sh`) |
-| `testdata/browser` | Browser tests: `stage3_tests.py` (headless Chromium against the test server), `fake_page_smoke.js` and `config_page_smoke.js` (no server), `reload_spike.py` |
+| `testdata/` | Scripts for the throwaway Jellyfin test server: fixtures, users, `stage2_api_tests.py`, `stage4_api_tests.py`, `stage5_api_tests.py`, the TestWebm library (`make_webm.sh`, `reset_webm03_srt.sh`, `reset_webm03_formats.sh`) |
+| `testdata/browser` | Browser tests: `stage3_tests.py` and `stage5_tests.py` (headless Chromium against the test server), `fake_page_smoke.js` and `config_page_smoke.js` (no server), `reload_spike.py` |
 | `devtools/` | `sync.sh`, `dotnet.sh` (build/test in the SDK container on the test host), `prepare_mismatch.sh`, `mutation_check.py` |
 | `STAGE0-NOTES.md` | What Jellyfin 12.2 actually does (cache, encoding, refresh) |
 | `docs/client-notes.md` | What jellyfin-web 12.2 actually does (load order, OSD, Sessions lag, Reload, phone width) |
@@ -40,7 +42,7 @@ settings from the environment (see `devtools/env.sh`; there are no defaults, a m
 | `SQE_HOST_EXEC` | Command prefix that runs a command string on the test host; it gets the whole quoted command as one last argument (stdin is passed through) | `ssh myhost`, `ssh myhost pct exec 103 --`, or `sh -c` for a local test server |
 | `SQE_TEST_ROOT` | Test server folder on that host, holding `config/`, `media/` and `src/` | `/srv/jellyfin-test` |
 | `JF_BASE` | Test server URL, used by `testdata/*.py` | `http://test-host:8097` |
-| `SQE_LOG_CMD` | Optional: command that prints the test container's last 2000 log lines to stdout, for `stage2_api_tests.py` and `stage4_api_tests.py` (default: `docker logs --tail 2000 $SQE_CONTAINER` through `SQE_HOST_EXEC`). Split like a shell line, no pipes | `my-log-tool jellyfin-test 2000` |
+| `SQE_LOG_CMD` | Optional: command that prints the test container's last 2000 log lines to stdout, for `stage2_api_tests.py`, `stage4_api_tests.py` and `stage5_api_tests.py` (default: `docker logs --tail 2000 $SQE_CONTAINER` through `SQE_HOST_EXEC`). Split like a shell line, no pipes | `my-log-tool jellyfin-test 2000` |
 | `SQE_CONTAINER` | Optional: test server container name (default `jellyfin-test`) | |
 | `SQE_DIR` | Optional: synced project folder on the host (default `$SQE_TEST_ROOT/src/sqe`) | |
 
@@ -63,15 +65,20 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
 - Stage 4 API tests: `python3 -I testdata/stage4_api_tests.py <secrets-dir>` covers "Allow user edits", `Me`, and
   submitting, withdrawing, approving (also after the file changed, with conflicts and in part) and rejecting. It uses
   `testuser` (sees the library) and `limiteduser` (does not), and puts the settings back to the defaults at the end.
-- `devtools/mutation_check.py` breaks the code in scratch copies (17 ways) and requires the unit tests to fail for each break. Last run: control passed, 17 of 17 killed.
-- Client, no server needed: `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js` (166 tests),
-  `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` (43 of 43 killed), and with Playwright for
-  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (66 checks against a fake jellyfin-web page, as admin, submitter and a user without rights), and
+- Stage 5 API tests: `python3 -I testdata/stage5_api_tests.py <secrets-dir>` writes a richer `.vtt` and `.ass` over
+  episode 3's and checks cues, refusals, saves byte for byte (BOM, CRLF, tags, comments and other blocks kept), backups
+  with the subtitle's extension, Restore, and an approved submission on an ASS file. It resets the fixtures at the end.
+- `devtools/mutation_check.py` breaks the code in scratch copies (28 ways) and requires the unit tests to fail for each break.
+- Client, no server needed: `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js` (174 tests),
+  `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` (49 of 49 killed), and with Playwright for
+  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (76 checks against a fake jellyfin-web page, as admin, submitter and a user without rights, and with an ASS file), and
   `node testdata/browser/config_page_smoke.js` (14 checks of the settings page with a mock server).
 - Client against the test server: `testdata/browser/stage3_tests.py` (see its header; also the stage 4 user modes, which
   change the plugin settings and put the defaults back). It needs the TestWebm library and
   changes test subtitles: TestWebm 01 is restored through the API; run `testdata/reset_webm03_srt.sh` in the test
   container before and after, because the API cannot remove the line it adds to TestWebm 03.
+  `testdata/browser/stage5_tests.py` (same way of running) edits TestWebm 03's `.vtt` and `.ass` and restores them
+  through the API; run `testdata/reset_webm03_formats.sh` in the test container once before the first run.
 
 ## Analyzers
 
@@ -173,7 +180,7 @@ are marked failed. `window.SubtitleQuickEdit.debugState()` shows the client's st
 
 ## Settings
 
-Dashboard, Plugins, Subtitle Quick Edit. Below the settings, **Submissions** lists the ones waiting for review (or the
+Dashboard, Plugins, Subtitle Editor. Below the settings, **Submissions** lists the ones waiting for review (or the
 newest 50 decided ones): item, subtitle, user, note, and each change with a checkbox. **Approve selected** writes the
 ticked changes in one save; **Reject** takes an optional reason that the user sees. Deciding needs "Allow user
 submissions" on.

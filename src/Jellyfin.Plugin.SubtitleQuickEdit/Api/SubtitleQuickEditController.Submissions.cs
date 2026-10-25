@@ -320,7 +320,7 @@ public partial class SubtitleQuickEditController
                 result.Save.Method);
             foreach (string note in result.Save.Notes)
             {
-                logger.LogWarning("Subtitle Quick Edit: {Note}", note);
+                logger.LogWarning("Subtitle Editor: {Note}", note);
             }
 
             return new ApproveResponse
@@ -427,7 +427,7 @@ public partial class SubtitleQuickEditController
     {
         if (ex.Error == SubmissionError.StorageFailed)
         {
-            logger.LogError(ex, "Subtitle Quick Edit could not store a submission.");
+            logger.LogError(ex, "Subtitle Editor could not store a submission.");
         }
 
         return ex.Error switch
@@ -482,7 +482,7 @@ public partial class SubtitleQuickEditController
                 rights.User!.Id)
             {
                 ShortOverview = itemName,
-                Overview = "Review it in Dashboard, Plugins, Subtitle Quick Edit.",
+                Overview = "Review it in Dashboard, Plugins, Subtitle Editor.",
                 ItemId = item.Id.ToString("N", CultureInfo.InvariantCulture),
                 LogSeverity = LogLevel.Information,
             };
@@ -491,7 +491,7 @@ public partial class SubtitleQuickEditController
         catch (Exception ex)
         {
             // The activity log is a courtesy; any failure there must not fail the submission.
-            logger.LogWarning(ex, "Subtitle Quick Edit could not add the submission to the activity log.");
+            logger.LogWarning(ex, "Subtitle Editor could not add the submission to the activity log.");
         }
     }
 }
