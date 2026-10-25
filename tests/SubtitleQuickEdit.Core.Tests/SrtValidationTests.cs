@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 using Xunit;
 
 namespace SubtitleQuickEdit.Core.Tests;
@@ -25,14 +26,14 @@ public class SrtValidationTests
     {
         SrtDocument doc = Doc();
 
-        SrtEditException edit = Assert.Throws<SrtEditException>(
-            () => doc.Apply(new SrtEdit[] { new SrtTextEdit(1, "Hello there.", text) }));
-        SrtEditException add = Assert.Throws<SrtEditException>(
-            () => doc.Apply(new SrtEdit[] { new SrtAddCue("x", 100, 900, text) }));
+        SubtitleEditException edit = Assert.Throws<SubtitleEditException>(
+            () => doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(1, "Hello there.", text) }));
+        SubtitleEditException add = Assert.Throws<SubtitleEditException>(
+            () => doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("x", 100, 900, text) }));
 
-        Assert.Equal(SrtEditError.InvalidEdit, edit.Error);
+        Assert.Equal(SubtitleEditError.InvalidEdit, edit.Error);
         Assert.Equal(1, edit.CuePosition);
-        Assert.Equal(SrtEditError.InvalidEdit, add.Error);
+        Assert.Equal(SubtitleEditError.InvalidEdit, add.Error);
         Assert.Null(edit.ClientId);
         Assert.Equal("x", add.ClientId);
     }
@@ -42,16 +43,16 @@ public class SrtValidationTests
     {
         SrtDocument doc = Doc();
 
-        SrtEditException late = Assert.Throws<SrtEditException>(
-            () => doc.Apply(new SrtEdit[] { new SrtAddCue("fine", 100, 900, "ok"), new SrtAddCue("late", 500, 520, "too short") }));
-        SrtEditException twin = Assert.Throws<SrtEditException>(
-            () => doc.Apply(new SrtEdit[] { new SrtAddCue("same", 100, 900, "a"), new SrtAddCue("same", 1000, 2000, "b") }));
-        SrtEditException mismatch = Assert.Throws<SrtEditException>(
-            () => doc.Apply(new SrtEdit[] { new SrtTextEdit(1, "not the text", "x") }));
+        SubtitleEditException late = Assert.Throws<SubtitleEditException>(
+            () => doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("fine", 100, 900, "ok"), new SubtitleAddCue("late", 500, 520, "too short") }));
+        SubtitleEditException twin = Assert.Throws<SubtitleEditException>(
+            () => doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("same", 100, 900, "a"), new SubtitleAddCue("same", 1000, 2000, "b") }));
+        SubtitleEditException mismatch = Assert.Throws<SubtitleEditException>(
+            () => doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(1, "not the text", "x") }));
 
         Assert.Equal("late", late.ClientId);
         Assert.Equal("same", twin.ClientId);
-        Assert.Equal(SrtEditError.TextMismatch, mismatch.Error);
+        Assert.Equal(SubtitleEditError.TextMismatch, mismatch.Error);
         Assert.Null(mismatch.ClientId);
     }
 
@@ -64,7 +65,7 @@ public class SrtValidationTests
     {
         SrtDocument doc = Doc();
 
-        SrtApplyResult result = doc.Apply(new SrtEdit[] { new SrtTextEdit(1, "Hello there.", text) });
+        SubtitleApplyResult result = doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(1, "Hello there.", text) });
 
         string expected = text.Replace("\r\n", "\n", StringComparison.Ordinal);
         Assert.Equal(expected, SrtDocument.Parse(result.Content.ToArray()).Document!.Cues[0].Text);
@@ -77,10 +78,10 @@ public class SrtValidationTests
     [InlineData(500)]
     public void A_cue_position_that_does_not_exist_is_refused(int position)
     {
-        SrtEditException ex = Assert.Throws<SrtEditException>(
-            () => Doc().Apply(new SrtEdit[] { new SrtTextEdit(position, "x", "y") }));
+        SubtitleEditException ex = Assert.Throws<SubtitleEditException>(
+            () => Doc().Apply(new SubtitleEdit[] { new SubtitleTextEdit(position, "x", "y") }));
 
-        Assert.Equal(SrtEditError.CueNotFound, ex.Error);
+        Assert.Equal(SubtitleEditError.CueNotFound, ex.Error);
         Assert.Equal(position, ex.CuePosition);
     }
 
@@ -89,15 +90,15 @@ public class SrtValidationTests
     {
         SrtDocument doc = Doc();
 
-        SrtEditException ex = Assert.Throws<SrtEditException>(
+        SubtitleEditException ex = Assert.Throws<SubtitleEditException>(
             () => doc.Apply(
-                new SrtEdit[]
+                new SubtitleEdit[]
                 {
-                    new SrtTextEdit(1, "Hello there.", "Fine"),
-                    new SrtTextEdit(2, "Somebody else changed this", "Mine"),
+                    new SubtitleTextEdit(1, "Hello there.", "Fine"),
+                    new SubtitleTextEdit(2, "Somebody else changed this", "Mine"),
                 }));
 
-        Assert.Equal(SrtEditError.TextMismatch, ex.Error);
+        Assert.Equal(SubtitleEditError.TextMismatch, ex.Error);
         Assert.Equal(2, ex.CuePosition);
         Assert.Contains("Cue 2", ex.Message, StringComparison.Ordinal);
     }
@@ -105,23 +106,23 @@ public class SrtValidationTests
     [Fact]
     public void The_same_cue_edited_twice_in_one_request_is_refused()
     {
-        SrtEditException ex = Assert.Throws<SrtEditException>(
+        SubtitleEditException ex = Assert.Throws<SubtitleEditException>(
             () => Doc().Apply(
-                new SrtEdit[]
+                new SubtitleEdit[]
                 {
-                    new SrtTextEdit(1, "Hello there.", "One"),
-                    new SrtTextEdit(1, "Hello there.", "Two"),
+                    new SubtitleTextEdit(1, "Hello there.", "One"),
+                    new SubtitleTextEdit(1, "Hello there.", "Two"),
                 }));
 
-        Assert.Equal(SrtEditError.InvalidEdit, ex.Error);
+        Assert.Equal(SubtitleEditError.InvalidEdit, ex.Error);
     }
 
     [Fact]
     public void An_unknown_edit_type_is_refused()
     {
-        SrtEditException ex = Assert.Throws<SrtEditException>(() => Doc().Apply(new SrtEdit[] { new UnknownEdit() }));
+        SubtitleEditException ex = Assert.Throws<SubtitleEditException>(() => Doc().Apply(new SubtitleEdit[] { new UnknownEdit() }));
 
-        Assert.Equal(SrtEditError.InvalidEdit, ex.Error);
+        Assert.Equal(SubtitleEditError.InvalidEdit, ex.Error);
     }
 
     [Theory]
@@ -133,10 +134,10 @@ public class SrtValidationTests
     [InlineData(1000, 360_000_000)]
     public void Bad_times_on_an_added_cue_are_refused(long start, long end)
     {
-        SrtEditException ex = Assert.Throws<SrtEditException>(
-            () => Doc().Apply(new SrtEdit[] { new SrtAddCue("x", start, end, "Text") }));
+        SubtitleEditException ex = Assert.Throws<SubtitleEditException>(
+            () => Doc().Apply(new SubtitleEdit[] { new SubtitleAddCue("x", start, end, "Text") }));
 
-        Assert.Equal(SrtEditError.InvalidEdit, ex.Error);
+        Assert.Equal(SubtitleEditError.InvalidEdit, ex.Error);
     }
 
     [Theory]
@@ -145,7 +146,7 @@ public class SrtValidationTests
     [InlineData(358_000_000, 359_999_999)]
     public void Boundary_times_on_an_added_cue_are_accepted(long start, long end)
     {
-        SrtApplyResult result = Doc().Apply(new SrtEdit[] { new SrtAddCue("x", start, end, "Text") });
+        SubtitleApplyResult result = Doc().Apply(new SubtitleEdit[] { new SubtitleAddCue("x", start, end, "Text") });
 
         SrtDocument after = SrtDocument.Parse(result.Content.ToArray()).Document!;
         Assert.Contains(after.Cues, c => c.StartMs == start && c.EndMs == end);
@@ -156,11 +157,11 @@ public class SrtValidationTests
     {
         SrtDocument doc = Doc();
 
-        SrtEditException ex = Assert.Throws<SrtEditException>(
-            () => doc.Apply(new SrtEdit[] { new SrtAddCue("x", 59_000, 60_001, "Text") }, runtimeMs: 60_000));
-        SrtApplyResult exact = doc.Apply(new SrtEdit[] { new SrtAddCue("x", 59_000, 60_000, "Text") }, runtimeMs: 60_000);
+        SubtitleEditException ex = Assert.Throws<SubtitleEditException>(
+            () => doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("x", 59_000, 60_001, "Text") }, runtimeMs: 60_000));
+        SubtitleApplyResult exact = doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("x", 59_000, 60_000, "Text") }, runtimeMs: 60_000);
 
-        Assert.Equal(SrtEditError.InvalidEdit, ex.Error);
+        Assert.Equal(SubtitleEditError.InvalidEdit, ex.Error);
         Assert.NotEmpty(exact.Content.ToArray());
     }
 
@@ -170,12 +171,12 @@ public class SrtValidationTests
         SrtDocument doc = Doc();
 
         Assert.Equal(
-            SrtEditError.InvalidEdit,
-            Assert.Throws<SrtEditException>(() => doc.Apply(new SrtEdit[] { new SrtAddCue(string.Empty, 100, 900, "T") })).Error);
+            SubtitleEditError.InvalidEdit,
+            Assert.Throws<SubtitleEditException>(() => doc.Apply(new SubtitleEdit[] { new SubtitleAddCue(string.Empty, 100, 900, "T") })).Error);
         Assert.Equal(
-            SrtEditError.InvalidEdit,
-            Assert.Throws<SrtEditException>(
-                () => doc.Apply(new SrtEdit[] { new SrtAddCue("a", 100, 900, "T"), new SrtAddCue("a", 2000, 2900, "U") })).Error);
+            SubtitleEditError.InvalidEdit,
+            Assert.Throws<SubtitleEditException>(
+                () => doc.Apply(new SubtitleEdit[] { new SubtitleAddCue("a", 100, 900, "T"), new SubtitleAddCue("a", 2000, 2900, "U") })).Error);
     }
 
     [Fact]
@@ -184,13 +185,13 @@ public class SrtValidationTests
         SrtDocument doc = Doc();
         string before = doc.Hash;
 
-        Assert.Throws<SrtEditException>(
-            () => doc.Apply(new SrtEdit[] { new SrtTextEdit(1, "Hello there.", "Fine"), new SrtTextEdit(99, "x", "y") }));
+        Assert.Throws<SubtitleEditException>(
+            () => doc.Apply(new SubtitleEdit[] { new SubtitleTextEdit(1, "Hello there.", "Fine"), new SubtitleTextEdit(99, "x", "y") }));
 
         Assert.Equal(before, doc.Hash);
         Assert.Equal(Fixtures.English, doc.Cues.Select(c => c.Text).ToArray());
-        Assert.Equal(before, doc.Apply(Array.Empty<SrtEdit>()).Hash);
+        Assert.Equal(before, doc.Apply(Array.Empty<SubtitleEdit>()).Hash);
     }
 
-    private sealed record UnknownEdit : SrtEdit;
+    private sealed record UnknownEdit : SubtitleEdit;
 }

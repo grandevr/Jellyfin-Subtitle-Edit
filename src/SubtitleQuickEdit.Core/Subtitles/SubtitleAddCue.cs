@@ -1,4 +1,4 @@
-namespace SubtitleQuickEdit.Core.Srt;
+namespace SubtitleQuickEdit.Core.Subtitles;
 
 /// <summary>
 /// Adds a new cue, inserted in start-time order.
@@ -7,4 +7,4 @@ namespace SubtitleQuickEdit.Core.Srt;
 /// <param name="StartMs">Start time in milliseconds.</param>
 /// <param name="EndMs">End time in milliseconds.</param>
 /// <param name="Text">The cue text. Line breaks are <c>\n</c>.</param>
-public sealed record SrtAddCue(string ClientId, long StartMs, long EndMs, string Text) : SrtEdit;
+public sealed record SubtitleAddCue(string ClientId, long StartMs, long EndMs, string Text) : SubtitleEdit;

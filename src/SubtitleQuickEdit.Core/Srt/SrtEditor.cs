@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Srt;
 
@@ -11,11 +12,11 @@ namespace SubtitleQuickEdit.Core.Srt;
 /// </summary>
 internal static class SrtEditor
 {
-    internal static SrtApplyResult Apply(SrtDocument doc, IReadOnlyList<SrtEdit> edits, long? runtimeMs)
+    internal static SubtitleApplyResult Apply(SrtDocument doc, IReadOnlyList<SubtitleEdit> edits, long? runtimeMs)
     {
         if (edits.Count == 0)
         {
-            return new SrtApplyResult(
+            return new SubtitleApplyResult(
                 doc.Data.ToArray(),
                 doc.Hash,
                 new Dictionary<string, int>(),
@@ -23,30 +24,30 @@ internal static class SrtEditor
         }
 
         var textEdits = new Dictionary<int, (string Old, string New)>();
-        var adds = new List<(SrtAddCue Cue, string Text, int Order)>();
+        var adds = new List<(SubtitleAddCue Cue, string Text, int Order)>();
         var clientIds = new HashSet<string>(StringComparer.Ordinal);
-        foreach (SrtEdit edit in edits)
+        foreach (SubtitleEdit edit in edits)
         {
             switch (edit)
             {
-                case SrtTextEdit te:
+                case SubtitleTextEdit te:
                     ValidateTextEdit(doc, te, textEdits);
                     break;
-                case SrtAddCue add:
+                case SubtitleAddCue add:
                     try
                     {
                         ValidateAdd(add, runtimeMs, clientIds);
                         adds.Add((add, NormalizeAndValidateText(add.Text, null), adds.Count));
                     }
-                    catch (SrtEditException ex) when (ex.Error == SrtEditError.InvalidEdit && ex.ClientId is null && !string.IsNullOrEmpty(add.ClientId))
+                    catch (SubtitleEditException ex) when (ex.Error == SubtitleEditError.InvalidEdit && ex.ClientId is null && !string.IsNullOrEmpty(add.ClientId))
                     {
                         // Name the added line, so the client can mark the right row.
-                        throw new SrtEditException(ex.Error, ex.Message, ex.CuePosition) { ClientId = add.ClientId };
+                        throw new SubtitleEditException(ex.Error, ex.Message, ex.CuePosition) { ClientId = add.ClientId };
                     }
 
                     break;
                 default:
-                    throw new SrtEditException(SrtEditError.InvalidEdit, "Unknown edit type.");
+                    throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "Unknown edit type.");
             }
         }
 
@@ -56,7 +57,7 @@ internal static class SrtEditor
         // Text replacements.
         foreach (KeyValuePair<int, (string Old, string New)> pair in textEdits)
         {
-            SrtCue cue = doc.Cues[pair.Key - 1];
+            SubtitleCue cue = doc.Cues[pair.Key - 1];
             if (string.Equals(pair.Value.Old, pair.Value.New, StringComparison.Ordinal))
             {
                 continue;
@@ -78,8 +79,8 @@ internal static class SrtEditor
 
         // Where each added cue goes: before the first cue that starts later, otherwise at the end.
         var sortedAdds = adds.OrderBy(a => a.Cue.StartMs).ThenBy(a => a.Order).ToList();
-        var addsBefore = new Dictionary<int, List<(SrtAddCue Cue, string Text)>>();
-        foreach ((SrtAddCue cue, string text, int _) in sortedAdds)
+        var addsBefore = new Dictionary<int, List<(SubtitleAddCue Cue, string Text)>>();
+        foreach ((SubtitleAddCue cue, string text, int _) in sortedAdds)
         {
             int k = doc.Cues.Count;
             for (int i = 0; i < doc.Cues.Count; i++)
@@ -91,9 +92,9 @@ internal static class SrtEditor
                 }
             }
 
-            if (!addsBefore.TryGetValue(k, out List<(SrtAddCue Cue, string Text)>? list))
+            if (!addsBefore.TryGetValue(k, out List<(SubtitleAddCue Cue, string Text)>? list))
             {
-                list = new List<(SrtAddCue Cue, string Text)>();
+                list = new List<(SubtitleAddCue Cue, string Text)>();
                 addsBefore[k] = list;
             }
 
@@ -107,10 +108,10 @@ internal static class SrtEditor
         int ordinal = 0;
         for (int k = 0; k <= doc.Cues.Count; k++)
         {
-            if (addsBefore.TryGetValue(k, out List<(SrtAddCue Cue, string Text)>? group))
+            if (addsBefore.TryGetValue(k, out List<(SubtitleAddCue Cue, string Text)>? group))
             {
                 var blocks = new List<string>();
-                foreach ((SrtAddCue cue, string text) in group)
+                foreach ((SubtitleAddCue cue, string text) in group)
                 {
                     ordinal++;
                     addedPositions[cue.ClientId] = ordinal;
@@ -145,7 +146,7 @@ internal static class SrtEditor
             }
 
             ordinal++;
-            SrtCue original = doc.Cues[k];
+            SubtitleCue original = doc.Cues[k];
             newPositionOfOriginal[k] = ordinal;
             string finalText = textEdits.TryGetValue(original.Position, out (string Old, string New) te) ? te.New : original.Text;
             expected.Add((original.StartMs, original.EndMs, finalText));
@@ -169,7 +170,7 @@ internal static class SrtEditor
         Verify(doc, content, expected, adds.Count > 0);
 
         var edited = textEdits.Keys.OrderBy(p => p).Select(p => newPositionOfOriginal[p - 1]).ToList();
-        return new SrtApplyResult(content, SrtDocument.ComputeHash(content), addedPositions, edited);
+        return new SubtitleApplyResult(content, SubtitleHash.Compute(content), addedPositions, edited);
     }
 
     /// <summary>
@@ -180,26 +181,26 @@ internal static class SrtEditor
     /// <returns>The text with <c>\n</c> breaks.</returns>
     internal static string NormalizeAndValidateText(string value, int? cuePosition)
     {
-        string text = SrtParser.NormalizeBreaks(value);
+        string text = SubtitleText.NormalizeBreaks(value);
         if (text.Length == 0)
         {
-            throw new SrtEditException(SrtEditError.InvalidEdit, "A cue must keep at least one character.", cuePosition);
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A cue must keep at least one character.", cuePosition);
         }
 
         foreach (string line in text.Split('\n'))
         {
             if (string.IsNullOrWhiteSpace(line))
             {
-                throw new SrtEditException(
-                    SrtEditError.InvalidEdit,
+                throw new SubtitleEditException(
+                    SubtitleEditError.InvalidEdit,
                     "A cue's text must not contain empty lines: a blank line would end the cue.",
                     cuePosition);
             }
 
             if (SrtPatterns.TimeLine().IsMatch(line))
             {
-                throw new SrtEditException(
-                    SrtEditError.InvalidEdit,
+                throw new SubtitleEditException(
+                    SubtitleEditError.InvalidEdit,
                     "A line of text must not look like a cue time line (hh:mm:ss,mmm --> hh:mm:ss,mmm).",
                     cuePosition);
             }
@@ -208,7 +209,7 @@ internal static class SrtEditor
             {
                 if (c < ' ' && c != '\t')
                 {
-                    throw new SrtEditException(SrtEditError.InvalidEdit, "The text contains a control character.", cuePosition);
+                    throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "The text contains a control character.", cuePosition);
                 }
             }
         }
@@ -216,31 +217,31 @@ internal static class SrtEditor
         return text;
     }
 
-    private static void ValidateTextEdit(SrtDocument doc, SrtTextEdit edit, Dictionary<int, (string Old, string New)> seen)
+    private static void ValidateTextEdit(SrtDocument doc, SubtitleTextEdit edit, Dictionary<int, (string Old, string New)> seen)
     {
         if (edit.CuePosition < 1 || edit.CuePosition > doc.Cues.Count)
         {
-            throw new SrtEditException(
-                SrtEditError.CueNotFound,
+            throw new SubtitleEditException(
+                SubtitleEditError.CueNotFound,
                 string.Create(CultureInfo.InvariantCulture, $"Cue {edit.CuePosition} does not exist; the file has {doc.Cues.Count} cues."),
                 edit.CuePosition);
         }
 
         if (seen.ContainsKey(edit.CuePosition))
         {
-            throw new SrtEditException(
-                SrtEditError.InvalidEdit,
+            throw new SubtitleEditException(
+                SubtitleEditError.InvalidEdit,
                 string.Create(CultureInfo.InvariantCulture, $"Cue {edit.CuePosition} is edited more than once in the same request."),
                 edit.CuePosition);
         }
 
         string newText = NormalizeAndValidateText(edit.NewText, edit.CuePosition);
-        string oldText = SrtParser.NormalizeBreaks(edit.OldText ?? string.Empty);
-        SrtCue cue = doc.Cues[edit.CuePosition - 1];
+        string oldText = SubtitleText.NormalizeBreaks(edit.OldText ?? string.Empty);
+        SubtitleCue cue = doc.Cues[edit.CuePosition - 1];
         if (!string.Equals(oldText, cue.Text, StringComparison.Ordinal))
         {
-            throw new SrtEditException(
-                SrtEditError.TextMismatch,
+            throw new SubtitleEditException(
+                SubtitleEditError.TextMismatch,
                 string.Create(CultureInfo.InvariantCulture, $"Cue {edit.CuePosition} has changed since it was loaded."),
                 edit.CuePosition);
         }
@@ -248,41 +249,41 @@ internal static class SrtEditor
         seen[edit.CuePosition] = (cue.Text, newText);
     }
 
-    private static void ValidateAdd(SrtAddCue add, long? runtimeMs, HashSet<string> clientIds)
+    private static void ValidateAdd(SubtitleAddCue add, long? runtimeMs, HashSet<string> clientIds)
     {
         if (string.IsNullOrEmpty(add.ClientId))
         {
-            throw new SrtEditException(SrtEditError.InvalidEdit, "An added line needs a client id.");
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "An added line needs a client id.");
         }
 
         if (!clientIds.Add(add.ClientId))
         {
-            throw new SrtEditException(SrtEditError.InvalidEdit, "Two added lines share the client id '" + add.ClientId + "'.");
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "Two added lines share the client id '" + add.ClientId + "'.");
         }
 
         if (add.StartMs < 0)
         {
-            throw new SrtEditException(SrtEditError.InvalidEdit, "A new line cannot start before 00:00:00,000.");
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line cannot start before 00:00:00,000.");
         }
 
         if (add.EndMs <= add.StartMs)
         {
-            throw new SrtEditException(SrtEditError.InvalidEdit, "A new line must end after it starts.");
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line must end after it starts.");
         }
 
-        if (add.EndMs - add.StartMs < SrtDocument.MinCueDurationMs)
+        if (add.EndMs - add.StartMs < SubtitleLimits.MinCueDurationMs)
         {
-            throw new SrtEditException(SrtEditError.InvalidEdit, "A new line must be at least 100 ms long.");
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line must be at least 100 ms long.");
         }
 
         if (add.EndMs > SrtDocument.MaxTimeMs)
         {
-            throw new SrtEditException(SrtEditError.InvalidEdit, "A new line ends after 99:59:59,999, which an .srt file cannot hold.");
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line ends after 99:59:59,999, which an .srt file cannot hold.");
         }
 
         if (runtimeMs.HasValue && add.EndMs > runtimeMs.Value)
         {
-            throw new SrtEditException(SrtEditError.InvalidEdit, "A new line must not end after the end of the video.");
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line must not end after the end of the video.");
         }
     }
 
@@ -298,8 +299,8 @@ internal static class SrtEditor
             string shown = ex.CharUnknownHigh != '\0'
                 ? string.Create(CultureInfo.InvariantCulture, $"U+{char.ConvertToUtf32(ex.CharUnknownHigh, ex.CharUnknownLow):X4}")
                 : string.Create(CultureInfo.InvariantCulture, $"'{ex.CharUnknown}' (U+{(int)ex.CharUnknown:X4})");
-            throw new SrtEditException(
-                SrtEditError.Unrepresentable,
+            throw new SubtitleEditException(
+                SubtitleEditError.Unrepresentable,
                 $"The character {shown} cannot be stored in this file's {doc.Encoding.Name} encoding.",
                 cuePosition);
         }
@@ -325,7 +326,7 @@ internal static class SrtEditor
         {
             if (patch.Offset < cursor)
             {
-                throw new SrtEditException(SrtEditError.VerificationFailed, "Internal error: overlapping edits.");
+                throw new SubtitleEditException(SubtitleEditError.VerificationFailed, "Internal error: overlapping edits.");
             }
 
             output.Write(original[cursor..patch.Offset]);
@@ -342,8 +343,8 @@ internal static class SrtEditor
         SrtParseResult result = SrtParser.Parse(content);
         if (result.Document is null)
         {
-            throw new SrtEditException(
-                SrtEditError.VerificationFailed,
+            throw new SubtitleEditException(
+                SubtitleEditError.VerificationFailed,
                 "The edited file could not be read back (" + result.FailureReason + "). Nothing was saved.");
         }
 
@@ -351,28 +352,28 @@ internal static class SrtEditor
         if (!string.Equals(after.Encoding.Name, doc.Encoding.Name, StringComparison.Ordinal)
             || after.Encoding.BomLength != doc.Encoding.BomLength)
         {
-            throw new SrtEditException(
-                SrtEditError.VerificationFailed,
+            throw new SubtitleEditException(
+                SubtitleEditError.VerificationFailed,
                 "The edited file would be read in a different encoding than the original. Nothing was saved.");
         }
 
         if (after.Cues.Count != expected.Count)
         {
-            throw new SrtEditException(
-                SrtEditError.VerificationFailed,
+            throw new SubtitleEditException(
+                SubtitleEditError.VerificationFailed,
                 "The edited file would not have the expected cues (this can happen when a cue's text ends in a bare number). Nothing was saved.");
         }
 
         for (int i = 0; i < expected.Count; i++)
         {
-            SrtCue cue = after.Cues[i];
+            SubtitleCue cue = after.Cues[i];
             if (cue.StartMs != expected[i].Start
                 || cue.EndMs != expected[i].End
                 || !string.Equals(cue.Text, expected[i].Text, StringComparison.Ordinal)
                 || (renumbered && cue.Number != cue.Position))
             {
-                throw new SrtEditException(
-                    SrtEditError.VerificationFailed,
+                throw new SubtitleEditException(
+                    SubtitleEditError.VerificationFailed,
                     string.Create(CultureInfo.InvariantCulture, $"Cue {i + 1} would not read back as expected. Nothing was saved."),
                     i + 1);
             }

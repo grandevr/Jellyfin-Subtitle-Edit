@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using SubtitleQuickEdit.Core.Srt;
 using SubtitleQuickEdit.Core.Storage;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Tests;
 
@@ -164,5 +165,5 @@ internal static class Content
     public static byte[] Srt(string marker) =>
         Fixtures.Utf8(Fixtures.Render(Fixtures.Cues(new[] { "First " + marker, "Second " + marker, "Third " + marker })));
 
-    public static string Hash(byte[] data) => SrtDocument.ComputeHash(data);
+    public static string Hash(byte[] data) => SubtitleHash.Compute(data);
 }

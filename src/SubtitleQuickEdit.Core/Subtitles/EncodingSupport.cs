@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace SubtitleQuickEdit.Core.Srt;
+namespace SubtitleQuickEdit.Core.Subtitles;
 
 /// <summary>
 /// One-time registration of the .NET code-pages provider, needed for legacy encodings such as Windows-1250.

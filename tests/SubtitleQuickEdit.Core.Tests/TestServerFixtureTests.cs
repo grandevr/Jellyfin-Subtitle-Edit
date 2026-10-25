@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 using Xunit;
 
 namespace SubtitleQuickEdit.Core.Tests;
@@ -46,13 +47,13 @@ public class TestServerFixtureTests
             SrtDocument doc = parsed.Document!;
             Assert.Equal(12, doc.Cues.Count);
 
-            Assert.Equal(data, doc.Apply(Array.Empty<SrtEdit>()).Content.ToArray());
+            Assert.Equal(data, doc.Apply(Array.Empty<SubtitleEdit>()).Content.ToArray());
 
-            SrtApplyResult result = doc.Apply(
-                new SrtEdit[]
+            SubtitleApplyResult result = doc.Apply(
+                new SubtitleEdit[]
                 {
-                    new SrtTextEdit(2, doc.Cues[1].Text, "Edited by the test."),
-                    new SrtAddCue("n", 100, 900, "Added by the test."),
+                    new SubtitleTextEdit(2, doc.Cues[1].Text, "Edited by the test."),
+                    new SubtitleAddCue("n", 100, 900, "Added by the test."),
                 });
             SrtDocument after = SrtDocument.Parse(result.Content.ToArray()).Document!;
             Assert.Equal(13, after.Cues.Count);

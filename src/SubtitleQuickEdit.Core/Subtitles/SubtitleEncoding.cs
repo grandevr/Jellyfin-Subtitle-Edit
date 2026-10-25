@@ -2,15 +2,15 @@ using System;
 using System.Text;
 using UtfUnknown;
 
-namespace SubtitleQuickEdit.Core.Srt;
+namespace SubtitleQuickEdit.Core.Subtitles;
 
 /// <summary>
 /// The encoding of a subtitle file: a strict .NET encoding (it throws on bytes or characters it cannot
 /// handle instead of substituting) plus the length of the byte-order mark at the start of the file.
 /// </summary>
-public sealed class SrtEncoding
+public sealed class SubtitleEncoding
 {
-    private SrtEncoding(Encoding encoding, string name, int bomLength)
+    private SubtitleEncoding(Encoding encoding, string name, int bomLength)
     {
         Encoding = encoding;
         Name = name;
@@ -38,7 +38,7 @@ public sealed class SrtEncoding
     /// </summary>
     /// <param name="data">The file content.</param>
     /// <returns>The encoding, or null when it cannot be determined or is not supported.</returns>
-    public static SrtEncoding? Detect(byte[] data)
+    public static SubtitleEncoding? Detect(byte[] data)
     {
         ArgumentNullException.ThrowIfNull(data);
         EncodingSupport.EnsureCodePages();
@@ -60,12 +60,12 @@ public sealed class SrtEncoding
 
         if (data.Length >= 2 && data[0] == 0xFF && data[1] == 0xFE)
         {
-            return new SrtEncoding(new UnicodeEncoding(false, false, true), "utf-16le", 2);
+            return new SubtitleEncoding(new UnicodeEncoding(false, false, true), "utf-16le", 2);
         }
 
         if (data.Length >= 2 && data[0] == 0xFE && data[1] == 0xFF)
         {
-            return new SrtEncoding(new UnicodeEncoding(true, false, true), "utf-16be", 2);
+            return new SubtitleEncoding(new UnicodeEncoding(true, false, true), "utf-16be", 2);
         }
 
         DetectionDetail? detected = CharsetDetector.DetectFromBytes(data).Detected;
@@ -82,12 +82,12 @@ public sealed class SrtEncoding
 
         if (name == "utf-16le")
         {
-            return new SrtEncoding(new UnicodeEncoding(false, false, true), name, 0);
+            return new SubtitleEncoding(new UnicodeEncoding(false, false, true), name, 0);
         }
 
         if (name == "utf-16be")
         {
-            return new SrtEncoding(new UnicodeEncoding(true, false, true), name, 0);
+            return new SubtitleEncoding(new UnicodeEncoding(true, false, true), name, 0);
         }
 
         Encoding? encoding = detected.Encoding;
@@ -99,10 +99,10 @@ public sealed class SrtEncoding
         var strict = (Encoding)encoding.Clone();
         strict.DecoderFallback = DecoderFallback.ExceptionFallback;
         strict.EncoderFallback = EncoderFallback.ExceptionFallback;
-        return new SrtEncoding(strict, name, 0);
+        return new SubtitleEncoding(strict, name, 0);
     }
 
-    private static SrtEncoding Utf8(int bomLength) => new(new UTF8Encoding(false, true), "utf-8", bomLength);
+    private static SubtitleEncoding Utf8(int bomLength) => new(new UTF8Encoding(false, true), "utf-8", bomLength);
 
     private static bool IsValidUtf8(byte[] data)
     {

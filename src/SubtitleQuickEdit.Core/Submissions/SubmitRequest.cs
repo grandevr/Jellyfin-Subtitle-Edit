@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Submissions;
 
@@ -23,7 +23,7 @@ public sealed record SubmitRequest(
     int StreamIndex,
     string Path,
     string BaseHash,
-    IReadOnlyList<SrtEdit> Edits,
+    IReadOnlyList<SubtitleEdit> Edits,
     string? Note,
     long? RuntimeMs,
     int MaxPending);

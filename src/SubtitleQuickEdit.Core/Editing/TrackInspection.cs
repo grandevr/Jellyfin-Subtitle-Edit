@@ -1,4 +1,4 @@
-using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Editing;
 
@@ -7,7 +7,7 @@ namespace SubtitleQuickEdit.Core.Editing;
 /// </summary>
 /// <param name="Document">The parsed file, or null when it is not editable.</param>
 /// <param name="Reason">Why it is not editable, or null when it is.</param>
-public sealed record TrackInspection(SrtDocument? Document, string? Reason)
+public sealed record TrackInspection(ISubtitleDocument? Document, string? Reason)
 {
     /// <summary>
     /// Gets a value indicating whether the file can be edited.

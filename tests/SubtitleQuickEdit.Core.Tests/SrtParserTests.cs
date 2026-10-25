@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 using Xunit;
 
 namespace SubtitleQuickEdit.Core.Tests;
@@ -26,7 +27,7 @@ public class SrtParserTests
         Assert.Equal(Enumerable.Range(1, fixture.Texts.Length), doc.Cues.Select(c => c.Number!.Value));
         Assert.Equal(2000, doc.Cues[0].StartMs);
         Assert.Equal(5000, doc.Cues[0].EndMs);
-        Assert.Equal(SrtDocument.ComputeHash(fixture.Data), doc.Hash);
+        Assert.Equal(SubtitleHash.Compute(fixture.Data), doc.Hash);
     }
 
     [Fact]
@@ -154,7 +155,7 @@ public class SrtParserTests
     [Fact]
     public void Oversized_files_are_not_editable()
     {
-        byte[] data = new byte[SrtDocument.MaxFileBytes + 1];
+        byte[] data = new byte[SubtitleLimits.MaxFileBytes + 1];
         Array.Fill(data, (byte)'a');
 
         SrtParseResult result = SrtDocument.Parse(data);
@@ -195,7 +196,7 @@ public class SrtParserTests
 
         SrtDocument doc = SrtDocument.Parse(data).Document!;
 
-        SrtCue second = doc.Cues[1];
+        SubtitleCue second = doc.Cues[1];
         int from = doc.ByteOffset(second.Layout.TextStart);
         int to = doc.ByteOffset(second.Layout.TextEnd);
         Assert.Equal("Second", Encoding.UTF8.GetString(data, from, to - from));

@@ -1,11 +1,11 @@
 using System;
 
-namespace SubtitleQuickEdit.Core.Srt;
+namespace SubtitleQuickEdit.Core.Subtitles;
 
 /// <summary>
 /// Why a set of edits was refused. The plugin maps these to HTTP status codes.
 /// </summary>
-public enum SrtEditError
+public enum SubtitleEditError
 {
     /// <summary>The edit itself is invalid (empty text, bad times, duplicate edit, ...). HTTP 400.</summary>
     InvalidEdit,
@@ -26,15 +26,15 @@ public enum SrtEditError
 /// <summary>
 /// Thrown when edits cannot be applied. Nothing has been changed when this is thrown.
 /// </summary>
-public sealed class SrtEditException : Exception
+public sealed class SubtitleEditException : Exception
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="SrtEditException"/> class.
+    /// Initializes a new instance of the <see cref="SubtitleEditException"/> class.
     /// </summary>
     /// <param name="error">The reason.</param>
     /// <param name="message">A message fit to show to the user.</param>
     /// <param name="cuePosition">The 1-based cue position the problem concerns, if any.</param>
-    public SrtEditException(SrtEditError error, string message, int? cuePosition = null)
+    public SubtitleEditException(SubtitleEditError error, string message, int? cuePosition = null)
         : base(message)
     {
         Error = error;
@@ -44,7 +44,7 @@ public sealed class SrtEditException : Exception
     /// <summary>
     /// Gets the reason.
     /// </summary>
-    public SrtEditError Error { get; }
+    public SubtitleEditError Error { get; }
 
     /// <summary>
     /// Gets the 1-based cue position the problem concerns, if any.

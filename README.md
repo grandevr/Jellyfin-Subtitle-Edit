@@ -1,17 +1,26 @@
 # Subtitle Quick Edit
 
-A Jellyfin 12.2 plugin that edits the text of the subtitle line on screen (or adds a new line) in external `.srt`
-files. Spec: the "Jellyfin Subtitle Quick-Edit Plugin — Spec" doc. Licence: GPL-3.0 (see `LICENSE`).
+A Jellyfin 12.3 plugin that edits the text of the subtitle line on screen (or adds a new line) in external `.srt`
+files (WebVTT and ASS/SSA are being added for 1.1). Spec: the "Jellyfin Subtitle Quick-Edit Plugin — Spec" doc. Licence: GPL-3.0 (see `LICENSE`).
 
-Status: **stage 3 done** (waiting on the hand test): the SRT core (stage 1), the plugin with its server API, settings
-page and backups (stage 2), and the client script in the web player (stage 3). Submissions and review are stage 4.
-Nothing is deployed to a live server yet.
+Status: **1.0 is live**; 1.1 (WebVTT and ASS/SSA editing, stage 5) is in progress.
+
+## Versions
+
+Docs name versions as 1.0, 1.1, 1.2; Jellyfin shows them with four numbers (1.1.0.0), which is also the plugin's
+folder name (`SubtitleQuickEdit_1.1.0.0`), so an update removes the old versioned folder.
+
+| Version | What | Code |
+|---|---|---|
+| 1.2 | Extract an embedded text track to an editable file next to the video (stage 6) | planned |
+| 1.1 | Edit WebVTT (`.vtt`) and ASS/SSA (`.ass`, `.ssa`) files as well as `.srt` (stage 5) | in progress |
+| 1.0 | `.srt` editing in the web player, backups and Revert, submissions for review and "Allow user edits" (stages 0 to 4). Built as 0.2.0.0 | main ff112ca, 2026-10-25 |
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `src/SubtitleQuickEdit.Core` | Jellyfin-free library: `Srt/` (parse, edit), `Storage/` (safe file write, backups, platform services), `Editing/` (the save rules) |
+| `src/SubtitleQuickEdit.Core` | Jellyfin-free library: `Subtitles/` (the format-neutral document, cue and edit model, encodings), `Srt/` (parse, edit .srt), `Storage/` (safe file write, backups, platform services), `Editing/` (the save rules) |
 | `src/Jellyfin.Plugin.SubtitleQuickEdit` | The plugin: controller, settings page, item/stream resolver, startup logging, File Transformation registration |
 | `src/Jellyfin.Plugin.SubtitleQuickEdit/Client` | The web player script: `logic.js` (page-free logic, Node-tested in `test/`), `quickedit.js` (button and panel), `quickedit.css` |
 | `tests/SubtitleQuickEdit.Core.Tests` | xUnit tests of the core |
@@ -47,7 +56,7 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
   the test is there to catch.
 - Install on the test server only: build the plugin straight into its plugin folder
   (`DOCKER_FLAGS="-v $SQE_TEST_ROOT/config/data/plugins:/plugins" devtools/dotnet.sh build
-  src/Jellyfin.Plugin.SubtitleQuickEdit -c Release -o /plugins/SubtitleQuickEdit_0.2.0.0`) and restart the container.
+  src/Jellyfin.Plugin.SubtitleQuickEdit -c Release -o /plugins/SubtitleQuickEdit_1.1.0.0`, after removing any older `SubtitleQuickEdit_*` folder) and restart the container.
   Jellyfin writes its own `meta.json`. `UtfUnknown.dll` is not shipped: the plugin uses the copy Jellyfin already has.
 - API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>` resets the fixtures and runs 75 checks against the
   test server (see below).
@@ -183,7 +192,7 @@ submissions" on.
 `data/SubtitleQuickEdit/backups` under Jellyfin's program-data folder (`/config/data/SubtitleQuickEdit/backups` in the
 Docker image; `IApplicationPaths.ProgramDataPath`). It is outside the versioned plugin folder, so backups survive a
 plugin update and a rollback (tested: delete the plugin folder, restart, backups remain, reinstall). Files are named
-`{itemId}_{streamIndex}_{pathId}_{utc time}_original.srt` (content from before the first save of that subtitle;
+`{itemId}_{streamIndex}_{pathId}_{utc time}_original.srt`, with the subtitle's own extension (content from before the first save of that subtitle;
 never overwritten or removed) and, in "Original + last N saves" mode, `…_save.srt` for the content from before each
 later save, pruned to the newest N. A backup that cannot be written stops the save.
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Srt;
 
@@ -27,12 +28,12 @@ internal static class SrtParser
             return SrtParseResult.Fail("The file is empty.");
         }
 
-        if (data.Length > SrtDocument.MaxFileBytes)
+        if (data.Length > SubtitleLimits.MaxFileBytes)
         {
             return SrtParseResult.Fail("The file is too large to edit.");
         }
 
-        SrtEncoding? encoding = SrtEncoding.Detect(data);
+        SubtitleEncoding? encoding = SubtitleEncoding.Detect(data);
         if (encoding is null)
         {
             return SrtParseResult.Fail("The text encoding could not be determined or is not supported.");
@@ -73,7 +74,7 @@ internal static class SrtParser
             kinds[i] = Classify(text, lines[i], out starts[i], out ends[i]);
         }
 
-        var cues = new List<SrtCue>();
+        var cues = new List<SubtitleCue>();
         int index = 0;
         int lastContentLine = -1;
         while (index < lines.Count)
@@ -124,7 +125,7 @@ internal static class SrtParser
             {
                 textStart = lines[timeLine + 1].Start;
                 textEnd = lines[end - 1].End;
-                cueText = NormalizeBreaks(text.Substring(textStart, textEnd - textStart));
+                cueText = SubtitleText.NormalizeBreaks(text.Substring(textStart, textEnd - textStart));
             }
 
             int numberStart = -1;
@@ -153,7 +154,7 @@ internal static class SrtParser
                 }
             }
 
-            cues.Add(new SrtCue
+            cues.Add(new SubtitleCue
             {
                 Position = cues.Count + 1,
                 Number = number,

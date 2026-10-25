@@ -6,7 +6,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using SubtitleQuickEdit.Core.Srt;
+using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Storage;
 
@@ -14,7 +14,8 @@ namespace SubtitleQuickEdit.Core.Storage;
 /// Keeps copies of subtitle files from before they are edited, in a folder outside the media and outside the
 /// versioned plugin folder.
 /// <para>
-/// Files are named <c>{itemId}_{streamIndex}_{pathId}_{utc timestamp}_original.srt</c> for the content from before the
+/// Files are named <c>{itemId}_{streamIndex}_{pathId}_{utc timestamp}_original.srt</c> (with the subtitle's own
+/// extension: <c>.srt</c>, <c>.vtt</c>, <c>.ass</c> or <c>.ssa</c>) for the content from before the
 /// very first save of a subtitle, and <c>…_save.srt</c> for the content from before each later save (only in
 /// <see cref="BackupMode.OriginalPlusLastN"/>). An original backup is never overwritten or removed.
 /// </para>
@@ -66,18 +67,19 @@ public sealed partial class BackupStore
         ArgumentNullException.ThrowIfNull(subtitlePath);
         ArgumentNullException.ThrowIfNull(currentContent);
         string key = Key(itemId, streamIndex, subtitlePath);
+        string extension = Extension(subtitlePath);
         try
         {
             Directory.CreateDirectory(folder);
             var created = new List<string>();
-            if (!Directory.EnumerateFiles(folder, key + "_*_" + OriginalKind + ".srt").Any())
+            if (!Directory.EnumerateFiles(folder, key + "_*_" + OriginalKind + extension).Any())
             {
-                created.Add(WriteNew(key, OriginalKind, currentContent));
+                created.Add(WriteNew(key, OriginalKind, extension, currentContent));
             }
             else if (mode == BackupMode.OriginalPlusLastN)
             {
-                created.Add(WriteNew(key, SaveKind, currentContent));
-                Prune(key, SaveKind, keepLastSaves);
+                created.Add(WriteNew(key, SaveKind, extension, currentContent));
+                Prune(key, SaveKind, extension, keepLastSaves);
             }
 
             return created;
@@ -110,8 +112,9 @@ public sealed partial class BackupStore
         try
         {
             Directory.CreateDirectory(folder);
-            string path = WriteNew(key, RestorePointKind, content);
-            Prune(key, RestorePointKind, RestorePointsKept);
+            string extension = Extension(subtitlePath);
+            string path = WriteNew(key, RestorePointKind, extension, content);
+            Prune(key, RestorePointKind, extension, RestorePointsKept);
             return path;
         }
         catch (UnauthorizedAccessException ex)
@@ -144,12 +147,12 @@ public sealed partial class BackupStore
         }
 
         string wanted = hash.Trim().ToLowerInvariant();
-        IEnumerable<string> files = Directory.EnumerateFiles(folder, key + "_*.srt")
+        IEnumerable<string> files = Directory.EnumerateFiles(folder, key + "_*" + Extension(subtitlePath))
             .OrderByDescending(f => Path.GetFileName(f), StringComparer.Ordinal);
         foreach (string file in files)
         {
             byte[] content = File.ReadAllBytes(file);
-            if (string.Equals(SrtDocument.ComputeHash(content), wanted, StringComparison.Ordinal))
+            if (string.Equals(SubtitleHash.Compute(content), wanted, StringComparison.Ordinal))
             {
                 return content;
             }
@@ -177,13 +180,20 @@ public sealed partial class BackupStore
         return Convert.ToHexStringLower(hash)[..8];
     }
 
-    private string WriteNew(string key, string kind, byte[] content)
+    // The subtitle's own extension, lower case, so a backup opens as the format it is.
+    private static string Extension(string subtitlePath)
+    {
+        string extension = Path.GetExtension(subtitlePath).ToLowerInvariant();
+        return string.IsNullOrEmpty(extension) ? ".srt" : extension;
+    }
+
+    private string WriteNew(string key, string kind, string extension, byte[] content)
     {
         string stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmssfff'Z'", CultureInfo.InvariantCulture);
         for (int attempt = 0; ; attempt++)
         {
             string suffix = attempt == 0 ? string.Empty : "-" + attempt.ToString(CultureInfo.InvariantCulture);
-            string path = Path.Combine(folder, key + "_" + stamp + suffix + "_" + kind + ".srt");
+            string path = Path.Combine(folder, key + "_" + stamp + suffix + "_" + kind + extension);
             try
             {
                 // CreateNew: an existing backup, original or not, is never overwritten.
@@ -199,9 +209,9 @@ public sealed partial class BackupStore
         }
     }
 
-    private void Prune(string key, string kind, int keep)
+    private void Prune(string key, string kind, string extension, int keep)
     {
-        List<string> kept = Directory.EnumerateFiles(folder, key + "_*_" + kind + ".srt")
+        List<string> kept = Directory.EnumerateFiles(folder, key + "_*_" + kind + extension)
             .OrderByDescending(f => Path.GetFileName(f), StringComparer.Ordinal)
             .ToList();
         foreach (string old in kept.Skip(keep))

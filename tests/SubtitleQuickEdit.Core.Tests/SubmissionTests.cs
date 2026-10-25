@@ -6,6 +6,7 @@ using SubtitleQuickEdit.Core.Editing;
 using SubtitleQuickEdit.Core.Srt;
 using SubtitleQuickEdit.Core.Storage;
 using SubtitleQuickEdit.Core.Submissions;
+using SubtitleQuickEdit.Core.Subtitles;
 using Xunit;
 
 namespace SubtitleQuickEdit.Core.Tests;
@@ -52,9 +53,9 @@ public class SubmissionTests
 
         public SrtDocument Doc => SrtDocument.Parse(File.ReadAllBytes(SubPath)).Document!;
 
-        public Submission Submit(string user, params SrtEdit[] edits) => Submit(user, null, 50, edits);
+        public Submission Submit(string user, params SubtitleEdit[] edits) => Submit(user, null, 50, edits);
 
-        public Submission Submit(string user, string? note, int maxPending, params SrtEdit[] edits) =>
+        public Submission Submit(string user, string? note, int maxPending, params SubtitleEdit[] edits) =>
             Service.Submit(new SubmitRequest(user, "name-" + user[..4], Item, 3, SubPath, Hash, edits, note, 600_000, maxPending));
 
         public ApproveResult Approve(string id, params int[] chosen) =>
@@ -80,7 +81,7 @@ public class SubmissionTests
         using var s = new Setup();
         byte[] before = File.ReadAllBytes(s.SubPath);
 
-        Submission sub = s.Submit(User, "  typo fix  ", 50, new SrtTextEdit(3, Text(3), "Did you hear that?!"), new SrtAddCue("n1", 500, 1500, "Intro"));
+        Submission sub = s.Submit(User, "  typo fix  ", 50, new SubtitleTextEdit(3, Text(3), "Did you hear that?!"), new SubtitleAddCue("n1", 500, 1500, "Intro"));
 
         Assert.Equal(before, File.ReadAllBytes(s.SubPath));
         Submission stored = Assert.Single(s.Store.All());
@@ -111,14 +112,14 @@ public class SubmissionTests
         using var s = new Setup();
         string hash = s.Hash;
 
-        var mismatch = Assert.Throws<SrtEditException>(() => s.Submit(User, new SrtTextEdit(2, "not the text", "x")));
-        Assert.Equal(SrtEditError.TextMismatch, mismatch.Error);
-        var empty = Assert.Throws<SrtEditException>(() => s.Submit(User));
-        Assert.Equal(SrtEditError.InvalidEdit, empty.Error);
+        var mismatch = Assert.Throws<SubtitleEditException>(() => s.Submit(User, new SubtitleTextEdit(2, "not the text", "x")));
+        Assert.Equal(SubtitleEditError.TextMismatch, mismatch.Error);
+        var empty = Assert.Throws<SubtitleEditException>(() => s.Submit(User));
+        Assert.Equal(SubtitleEditError.InvalidEdit, empty.Error);
         var stale = Assert.Throws<SubtitleWriteException>(() => s.Service.Submit(new SubmitRequest(
-            User, "u", Item, 3, s.SubPath, new string('0', 64), new SrtEdit[] { new SrtTextEdit(1, Text(1), "x") }, null, null, 50)));
+            User, "u", Item, 3, s.SubPath, new string('0', 64), new SubtitleEdit[] { new SubtitleTextEdit(1, Text(1), "x") }, null, null, 50)));
         Assert.Equal(SubtitleWriteError.Conflict, stale.Error);
-        var longNote = Assert.Throws<SubmissionException>(() => s.Submit(User, new string('a', 501), 50, new SrtTextEdit(1, Text(1), "x")));
+        var longNote = Assert.Throws<SubmissionException>(() => s.Submit(User, new string('a', 501), 50, new SubtitleTextEdit(1, Text(1), "x")));
         Assert.Equal(SubmissionError.TextTooLong, longNote.Error);
 
         Assert.Empty(s.Store.All());
@@ -129,14 +130,14 @@ public class SubmissionTests
     public void A_user_with_too_many_pending_submissions_is_refused_and_withdrawn_ones_do_not_count()
     {
         using var s = new Setup();
-        Submission first = s.Submit(User, null, 2, new SrtTextEdit(1, Text(1), "a"));
-        s.Submit(User, null, 2, new SrtTextEdit(2, Text(2), "b"));
+        Submission first = s.Submit(User, null, 2, new SubtitleTextEdit(1, Text(1), "a"));
+        s.Submit(User, null, 2, new SubtitleTextEdit(2, Text(2), "b"));
 
-        var refused = Assert.Throws<SubmissionException>(() => s.Submit(User, null, 2, new SrtTextEdit(3, Text(3), "c")));
+        var refused = Assert.Throws<SubmissionException>(() => s.Submit(User, null, 2, new SubtitleTextEdit(3, Text(3), "c")));
         Assert.Equal(SubmissionError.TooManyPending, refused.Error);
-        s.Submit(OtherUser, null, 2, new SrtTextEdit(3, Text(3), "c"));
+        s.Submit(OtherUser, null, 2, new SubtitleTextEdit(3, Text(3), "c"));
         s.Service.Withdraw(first.Id, User, "name");
-        s.Submit(User, null, 2, new SrtTextEdit(3, Text(3), "c"));
+        s.Submit(User, null, 2, new SubtitleTextEdit(3, Text(3), "c"));
 
         Assert.Equal(4, s.Store.All().Count);
     }
@@ -145,7 +146,7 @@ public class SubmissionTests
     public void Only_the_submitter_can_withdraw_and_only_while_pending()
     {
         using var s = new Setup();
-        Submission sub = s.Submit(User, new SrtTextEdit(1, Text(1), "a"));
+        Submission sub = s.Submit(User, new SubtitleTextEdit(1, Text(1), "a"));
 
         var notTheirs = Assert.Throws<SubmissionException>(() => s.Service.Withdraw(sub.Id, OtherUser, "other"));
         Assert.Equal(SubmissionError.NotFound, notTheirs.Error);
@@ -165,7 +166,7 @@ public class SubmissionTests
     {
         using var s = new Setup();
         string hash = s.Hash;
-        Submission sub = s.Submit(User, new SrtTextEdit(1, Text(1), "a"));
+        Submission sub = s.Submit(User, new SubtitleTextEdit(1, Text(1), "a"));
 
         Submission rejected = s.Service.Reject(sub.Id, "admin", " Not a typo. ");
 
@@ -176,14 +177,14 @@ public class SubmissionTests
         Assert.Equal(SubmissionError.NotPending, Assert.Throws<SubmissionException>(() => s.Service.Reject(sub.Id, "admin", null)).Error);
         Assert.Equal(
             SubmissionError.TextTooLong,
-            Assert.Throws<SubmissionException>(() => s.Service.Reject(s.Submit(User, new SrtTextEdit(2, Text(2), "b")).Id, "admin", new string('r', 501))).Error);
+            Assert.Throws<SubmissionException>(() => s.Service.Reject(s.Submit(User, new SubtitleTextEdit(2, Text(2), "b")).Id, "admin", new string('r', 501))).Error);
     }
 
     [Fact]
     public void Approving_an_unchanged_file_writes_every_edit_with_a_backup()
     {
         using var s = new Setup();
-        Submission sub = s.Submit(User, new SrtTextEdit(3, Text(3), "Did you hear that?!"), new SrtAddCue("n1", 500, 1500, "Intro"));
+        Submission sub = s.Submit(User, new SubtitleTextEdit(3, Text(3), "Did you hear that?!"), new SubtitleAddCue("n1", 500, 1500, "Intro"));
 
         ApproveResult result = s.Approve(sub.Id);
 
@@ -203,7 +204,7 @@ public class SubmissionTests
     public void Approving_selected_edits_writes_only_those_and_marks_the_rest_not_chosen()
     {
         using var s = new Setup();
-        Submission sub = s.Submit(User, new SrtTextEdit(1, Text(1), "First"), new SrtTextEdit(2, Text(2), "Second"));
+        Submission sub = s.Submit(User, new SubtitleTextEdit(1, Text(1), "First"), new SubtitleTextEdit(2, Text(2), "Second"));
 
         ApproveResult result = s.Approve(sub.Id, 1);
 
@@ -218,8 +219,8 @@ public class SubmissionTests
     public void After_lines_were_added_before_it_an_edit_is_found_again_by_start_time_and_text()
     {
         using var s = new Setup();
-        Submission sub = s.Submit(User, new SrtTextEdit(5, Text(5), "Let's leave."));
-        s.Saver.Save(new SaveRequest(Item, 3, s.SubPath, s.Hash, new SrtEdit[] { new SrtAddCue("x", 100, 900, "Before everything") }, null));
+        Submission sub = s.Submit(User, new SubtitleTextEdit(5, Text(5), "Let's leave."));
+        s.Saver.Save(new SaveRequest(Item, 3, s.SubPath, s.Hash, new SubtitleEdit[] { new SubtitleAddCue("x", 100, 900, "Before everything") }, null));
 
         ApproveResult result = s.Approve(sub.Id);
 
@@ -232,8 +233,8 @@ public class SubmissionTests
     public void An_edit_whose_line_changed_since_is_a_conflict_and_the_rest_is_still_written()
     {
         using var s = new Setup();
-        Submission sub = s.Submit(User, new SrtTextEdit(1, Text(1), "Hi."), new SrtTextEdit(2, Text(2), "Two lines\nof text."));
-        s.Saver.Save(new SaveRequest(Item, 3, s.SubPath, s.Hash, new SrtEdit[] { new SrtTextEdit(1, Text(1), "Hello, admin was here.") }, null));
+        Submission sub = s.Submit(User, new SubtitleTextEdit(1, Text(1), "Hi."), new SubtitleTextEdit(2, Text(2), "Two lines\nof text."));
+        s.Saver.Save(new SaveRequest(Item, 3, s.SubPath, s.Hash, new SubtitleEdit[] { new SubtitleTextEdit(1, Text(1), "Hello, admin was here.") }, null));
 
         ApproveResult result = s.Approve(sub.Id);
 
@@ -249,8 +250,8 @@ public class SubmissionTests
     public void When_no_chosen_edit_can_be_written_nothing_is_written_and_it_stays_pending()
     {
         using var s = new Setup();
-        Submission sub = s.Submit(User, new SrtTextEdit(1, Text(1), "Hi."), new SrtTextEdit(2, Text(2), "Two."));
-        s.Saver.Save(new SaveRequest(Item, 3, s.SubPath, s.Hash, new SrtEdit[] { new SrtTextEdit(1, Text(1), "Changed.") }, null));
+        Submission sub = s.Submit(User, new SubtitleTextEdit(1, Text(1), "Hi."), new SubtitleTextEdit(2, Text(2), "Two."));
+        s.Saver.Save(new SaveRequest(Item, 3, s.SubPath, s.Hash, new SubtitleEdit[] { new SubtitleTextEdit(1, Text(1), "Changed.") }, null));
         string hash = s.Hash;
 
         ApproveResult result = s.Approve(sub.Id, 0);
@@ -271,7 +272,7 @@ public class SubmissionTests
     public void An_invalid_choice_is_refused()
     {
         using var s = new Setup();
-        Submission sub = s.Submit(User, new SrtTextEdit(1, Text(1), "Hi."));
+        Submission sub = s.Submit(User, new SubtitleTextEdit(1, Text(1), "Hi."));
 
         Assert.Equal(SubmissionError.InvalidChoice, Assert.Throws<SubmissionException>(() => s.Approve(sub.Id, 1)).Error);
         Assert.Equal(SubmissionError.InvalidChoice, Assert.Throws<SubmissionException>(() => s.Approve(sub.Id, 0, 0)).Error);
@@ -286,7 +287,7 @@ public class SubmissionTests
     {
         using var s = new Setup(new CrashAt(WriteStage.TempWritten));
         string hash = s.Hash;
-        Submission sub = s.Submit(User, new SrtTextEdit(1, Text(1), "Hi."));
+        Submission sub = s.Submit(User, new SubtitleTextEdit(1, Text(1), "Hi."));
 
         Assert.Throws<SimulatedCrashException>(() => s.Approve(sub.Id));
 
@@ -298,7 +299,7 @@ public class SubmissionTests
     public void The_store_skips_unreadable_files_and_malformed_ids()
     {
         using var s = new Setup();
-        Submission sub = s.Submit(User, new SrtTextEdit(1, Text(1), "Hi."));
+        Submission sub = s.Submit(User, new SubtitleTextEdit(1, Text(1), "Hi."));
         string folder = Path.Combine(s.Root, "submissions");
         File.WriteAllText(Path.Combine(folder, "0123456789abcdef0123456789abcdef.json"), "{ not json");
         File.Copy(Path.Combine(folder, sub.Id + ".json"), Path.Combine(folder, "fedcba9876543210fedcba9876543210.json"));
