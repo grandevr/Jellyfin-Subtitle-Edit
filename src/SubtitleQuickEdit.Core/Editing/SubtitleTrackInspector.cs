@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using SubtitleQuickEdit.Core.Ass;
 using SubtitleQuickEdit.Core.Srt;
 using SubtitleQuickEdit.Core.Subtitles;
 using SubtitleQuickEdit.Core.Vtt;
@@ -63,6 +64,9 @@ public static class SubtitleTrackInspector
             case SubtitleFormat.WebVtt:
                 VttParseResult vtt = VttDocument.Parse(data);
                 return new TrackInspection(vtt.Document, vtt.FailureReason);
+            case SubtitleFormat.Ass:
+                AssParseResult ass = AssDocument.Parse(data);
+                return new TrackInspection(ass.Document, ass.FailureReason);
             default:
                 return new TrackInspection(null, SubtitleFormats.UnsupportedMessage);
         }
