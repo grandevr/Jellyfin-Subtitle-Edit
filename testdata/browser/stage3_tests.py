@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Stage 3 and 4 browser tests (3c button and panel, 3d editing, 3e saving, 3f adding, 3g phone width; 4c a user who
-submits for review, and a user allowed to edit), in headless Chromium against the
+submits for review, and a user allowed to edit; 4d the settings page's review and user-edit settings), in headless
+Chromium against the
 THROWAWAY test Jellyfin. The saving checks change "TestWebm 01" subtitles through the editor and put the original text
 back. The stage 4 checks change the plugin settings and put the defaults back at the end. The adding checks add a line to "TestWebm 03.en.srt", which the API cannot undo: run testdata/reset_webm03_srt.sh
 before and after.
@@ -813,6 +814,84 @@ def user_editing(browser, pages):
         ctx.close()
 
 
+def admin_reviewing(browser, pages):
+    """4d: the settings page: allow user edits for selected users, and approve or reject submissions."""
+    movie = MOVIES["TestWebm 01"]
+    srt = [t for t in tracks(movie) if t["external"] and t["format"] == "srt" and t["editable"]]
+    en = ([t for t in srt if t.get("language") in ("en", "eng")] or srt)[0]["streamIndex"]
+    original = cues_full(movie, en)
+    c = original["cues"]
+    st, uauth = api("POST", "/Users/AuthenticateByName", {"Username": USER_NAME, "Pw": USER_PW})
+    user_token = uauth["AccessToken"]
+    for sub in pending_submissions():
+        api("POST", "/SubtitleQuickEdit/Submissions/%s/Reject" % sub["id"], {}, token=TOKEN)
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    page = ctx.new_page()
+    pages.append(page)
+    try:
+        check("settings: user submissions on", configure(**dict(SETTING_DEFAULTS, AllowUserSubmissions=True)) == 204)
+
+        def submit(edits, note=None):
+            st, sub = api("POST", "/SubtitleQuickEdit/Items/%s/Subtitles/%d/Submissions" % (movie, en),
+                          {"baseHash": cues_full(movie, en)["hash"], "edits": edits, "note": note}, token=user_token)
+            return sub["id"]
+
+        two = submit([{"type": "edit", "cueIndex": 1, "oldText": c[0]["text"], "newText": c[0]["text"] + " (approved)"},
+                      {"type": "edit", "cueIndex": 2, "oldText": c[1]["text"], "newText": c[1]["text"] + " (not chosen)"}],
+                     "<b>bold?</b> two fixes")
+        one = submit([{"type": "edit", "cueIndex": 3, "oldText": c[2]["text"], "newText": c[2]["text"] + " (rejected)"}])
+        login(page, ADMIN_NAME, ADMIN_PW)
+        page.goto(BASE + "/web/#/configurationpage?name=SubtitleQuickEdit", wait_until="domcontentloaded")
+        page.wait_for_selector("#SqeReviewList .sqe-sub", timeout=20000)
+        check("the settings page lists both pending submissions, newest first",
+              page.evaluate("() => Array.from(document.querySelectorAll('#SqeReviewList .sqe-sub')).map((e) => e.getAttribute('data-submission-id'))")
+              == [one, two])
+        check("the title counts them", page.locator("#SqeReviewTitle").text_content() == "Submissions (2 waiting)")
+        box = page.locator('[data-submission-id="%s"]' % two)
+        check("the note is shown as text", "<b>bold?</b> two fixes" in (box.locator(".sqe-sub-note").text_content() or ""))
+        shot(page, "4d-review")
+        box.locator('.sqe-pick[data-index="1"]').uncheck()
+        box.locator(".sqe-approve").click()
+        page.wait_for_function("(id) => { const r = document.querySelector('[data-submission-id=\"' + id + '\"] .sqe-sub-result');"
+                               " return r && !r.hidden; }", arg=two, timeout=15000)
+        after = cues_full(movie, en)["cues"]
+        check("Approve selected writes only the ticked change",
+              after[0]["text"] == c[0]["text"] + " (approved)" and after[1]["text"] == c[1]["text"],
+              repr([after[0]["text"], after[1]["text"]]))
+        check("the page says partly approved",
+              (page.locator('[data-submission-id="%s"] .sqe-sub-result' % two).text_content() or "").startswith("Partly approved"))
+        box = page.locator('[data-submission-id="%s"]' % one)
+        box.locator(".sqe-reason").fill("Not needed")
+        box.locator(".sqe-reject").click()
+        page.wait_for_function("(id) => { const r = document.querySelector('[data-submission-id=\"' + id + '\"] .sqe-sub-result');"
+                               " return r && r.textContent === 'Rejected.'; }", arg=one, timeout=15000)
+        st, mine = api("GET", "/SubtitleQuickEdit/Submissions/Mine", token=user_token)
+        rejected = [x for x in mine if x["id"] == one]
+        check("Reject stores the reason for the user and leaves the file alone",
+              rejected and rejected[0]["state"] == "Rejected" and rejected[0].get("reason") == "Not needed" and
+              cues_full(movie, en)["cues"][2]["text"] == c[2]["text"], repr(rejected)[:200])
+
+        # Allow user edits for selected users, through the page.
+        page.locator("#UserEdits").select_option("SelectedUsers")
+        page.wait_for_selector(".sqe-user-edit", timeout=5000)
+        names = page.evaluate("() => Array.from(document.querySelectorAll('.sqe-user-edit')).map((i) => i.parentNode.textContent.trim())")
+        check("Selected users lists the non-admin users only", USER_NAME in names and ADMIN_NAME not in names, repr(names))
+        page.locator('.sqe-user-edit[data-user-id="%s"]' % user_id(USER_NAME)).check(force=True)
+        page.locator("#SubtitleQuickEditConfigForm button[type=submit]").click()
+        page.wait_for_timeout(1500)
+        st, cfg = api("GET", "/Plugins/%s/Configuration" % PLUGIN_ID, token=TOKEN)
+        check("Save stores Selected users with testuser",
+              cfg["UserEdits"] == "SelectedUsers" and [i.replace("-", "") for i in cfg["UserEditUserIds"]] == [user_id(USER_NAME).replace("-", "")],
+              repr(cfg.get("UserEditUserIds")))
+        shot(page, "4d-settings")
+    finally:
+        for sub in pending_submissions():
+            api("POST", "/SubtitleQuickEdit/Submissions/%s/Reject" % sub["id"], {"reason": "browser test"}, token=TOKEN)
+        restore_texts(movie, en, original["cues"])
+        configure(**SETTING_DEFAULTS)
+        ctx.close()
+
+
 def non_admin(browser, pages):
     ctx = browser.new_context(viewport={"width": 1280, "height": 720})
     page = ctx.new_page()
@@ -830,7 +909,8 @@ def non_admin(browser, pages):
 
 with sync_playwright() as p:
     browser = p.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
-    for scenario in (admin_desktop, admin_editing, admin_saving, admin_adding, admin_phone, non_admin, user_submitting, user_editing):
+    for scenario in (admin_desktop, admin_editing, admin_saving, admin_adding, admin_phone, non_admin, user_submitting, user_editing,
+                     admin_reviewing):
         pages = []
         try:
             scenario(browser, pages)

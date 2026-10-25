@@ -16,7 +16,7 @@ Nothing is deployed to a live server yet.
 | `src/Jellyfin.Plugin.SubtitleQuickEdit/Client` | The web player script: `logic.js` (page-free logic, Node-tested in `test/`), `quickedit.js` (button and panel), `quickedit.css` |
 | `tests/SubtitleQuickEdit.Core.Tests` | xUnit tests of the core |
 | `testdata/` | Scripts for the throwaway Jellyfin test server: fixtures, users, `stage2_api_tests.py`, `stage4_api_tests.py`, the TestWebm library (`make_webm.sh`, `reset_webm03_srt.sh`) |
-| `testdata/browser` | Browser tests: `stage3_tests.py` (headless Chromium against the test server), `fake_page_smoke.js` (no server), `reload_spike.py` |
+| `testdata/browser` | Browser tests: `stage3_tests.py` (headless Chromium against the test server), `fake_page_smoke.js` and `config_page_smoke.js` (no server), `reload_spike.py` |
 | `devtools/` | `sync.sh`, `dotnet.sh` (build/test in the SDK container on the test host), `prepare_mismatch.sh`, `mutation_check.py` |
 | `STAGE0-NOTES.md` | What Jellyfin 12.2 actually does (cache, encoding, refresh) |
 | `docs/client-notes.md` | What jellyfin-web 12.2 actually does (load order, OSD, Sessions lag, Reload, phone width) |
@@ -57,7 +57,8 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
 - `devtools/mutation_check.py` breaks the code in scratch copies (17 ways) and requires the unit tests to fail for each break. Last run: control passed, 17 of 17 killed.
 - Client, no server needed: `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js` (166 tests),
   `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` (43 of 43 killed), and with Playwright for
-  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (66 checks against a fake jellyfin-web page, as admin, submitter and a user without rights).
+  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (66 checks against a fake jellyfin-web page, as admin, submitter and a user without rights), and
+  `node testdata/browser/config_page_smoke.js` (14 checks of the settings page with a mock server).
 - Client against the test server: `testdata/browser/stage3_tests.py` (see its header; also the stage 4 user modes, which
   change the plugin settings and put the defaults back). It needs the TestWebm library and
   changes test subtitles: TestWebm 01 is restored through the API; run `testdata/reset_webm03_srt.sh` in the test
@@ -162,6 +163,11 @@ If the file changed on disk since it was loaded, Save writes nothing: changes th
 are marked failed. `window.SubtitleQuickEdit.debugState()` shows the client's state (no tokens) for troubleshooting.
 
 ## Settings
+
+Dashboard, Plugins, Subtitle Quick Edit. Below the settings, **Submissions** lists the ones waiting for review (or the
+newest 50 decided ones): item, subtitle, user, note, and each change with a checkbox. **Approve selected** writes the
+ticked changes in one save; **Reject** takes an optional reason that the user sees. Deciding needs "Allow user
+submissions" on.
 
 | Setting | Default | |
 |---|---|---|

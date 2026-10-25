@@ -6,16 +6,46 @@
 </head>
 <body>
     <div id="SubtitleQuickEditConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
+        <style>
+            #SubtitleQuickEditConfigPage .sqe-users { margin: 0 0 1.5em 1em; }
+            #SubtitleQuickEditConfigPage .sqe-review-head { display: flex; gap: 1em; align-items: center; flex-wrap: wrap; margin-top: 2.5em; }
+            #SubtitleQuickEditConfigPage .sqe-review-head h2 { margin: 0; }
+            #SubtitleQuickEditConfigPage .sqe-sub { margin: 1em 0; padding: 1em; border: 1px solid rgba(128, 128, 128, 0.4); border-radius: 6px; }
+            #SubtitleQuickEditConfigPage .sqe-sub-title { margin: 0 0 0.3em; font-size: 1.1em; }
+            #SubtitleQuickEditConfigPage .sqe-sub-meta, #SubtitleQuickEditConfigPage .sqe-sub-note { margin: 0.2em 0; opacity: 0.85; white-space: pre-line; }
+            #SubtitleQuickEditConfigPage .sqe-sub-changes { margin: 0.8em 0; padding: 0; list-style: none; }
+            #SubtitleQuickEditConfigPage .sqe-sub-change { display: flex; gap: 0.7em; align-items: flex-start; margin: 0.5em 0; }
+            #SubtitleQuickEditConfigPage .sqe-old { opacity: 0.7; text-decoration: line-through; white-space: pre-line; }
+            #SubtitleQuickEditConfigPage .sqe-new { white-space: pre-line; }
+            #SubtitleQuickEditConfigPage .sqe-where { opacity: 0.8; font-size: 0.9em; }
+            #SubtitleQuickEditConfigPage .sqe-outcome { font-size: 0.9em; font-weight: 600; }
+            #SubtitleQuickEditConfigPage .sqe-conflict { color: #ff8a80; }
+            #SubtitleQuickEditConfigPage .sqe-sub-actions { display: flex; gap: 0.7em; align-items: center; flex-wrap: wrap; }
+            #SubtitleQuickEditConfigPage .sqe-sub-actions .emby-button { margin: 0; }
+            #SubtitleQuickEditConfigPage .sqe-reason { flex: 1 1 14em; min-width: 10em; }
+            #SubtitleQuickEditConfigPage .sqe-sub-result { margin: 0.6em 0 0; font-weight: 600; }
+            #SubtitleQuickEditConfigPage .sqe-error { color: #ff8a80; }
+        </style>
         <div data-role="content">
             <div class="content-primary">
                 <h2>Subtitle Quick Edit</h2>
                 <form id="SubtitleQuickEditConfigForm">
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="UserEdits">Allow user edits</label>
+                        <select is="emby-select" id="UserEdits" class="emby-select-withcolor emby-select">
+                            <option value="Off">Off (only admins save edits)</option>
+                            <option value="AllUsers">All users</option>
+                            <option value="SelectedUsers">Selected users</option>
+                        </select>
+                        <div class="fieldDescription">These users save their edits straight to the file, like an admin, on the items they can see. They cannot review submissions or change settings.</div>
+                    </div>
+                    <div id="UserEditUsers" class="sqe-users" hidden></div>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label class="emby-checkbox-label">
                             <input id="AllowUserSubmissions" type="checkbox" is="emby-checkbox" />
                             <span>Allow user submissions</span>
                         </label>
-                        <div class="fieldDescription checkboxFieldDescription">Non-admin users get the edit panel, and send their edits to an admin for review instead of saving them.</div>
+                        <div class="fieldDescription checkboxFieldDescription">Other users get the edit panel and send their edits to an admin for review instead of saving them. Review them below.</div>
                     </div>
                     <div class="inputContainer">
                         <label class="inputLabel inputLabelUnfocused" for="MaxPendingSubmissionsPerUser">Max pending submissions per user</label>
@@ -40,41 +70,328 @@
                         </button>
                     </div>
                 </form>
+
+                <div id="SqeReview">
+                    <div class="sqe-review-head">
+                        <h2 id="SqeReviewTitle">Submissions</h2>
+                        <select is="emby-select" id="SqeReviewStatus" class="emby-select-withcolor emby-select" aria-label="Which submissions">
+                            <option value="pending">Waiting for review</option>
+                            <option value="decided">Decided (the newest 50)</option>
+                        </select>
+                    </div>
+                    <p id="SqeReviewOff" class="fieldDescription" hidden>User submissions are off: turn on "Allow user submissions" and save to approve or reject these.</p>
+                    <p id="SqeReviewEmpty" class="fieldDescription" hidden></p>
+                    <div id="SqeReviewList"></div>
+                </div>
             </div>
         </div>
         <script type="text/javascript">
-            var SubtitleQuickEditConfig = {
-                pluginUniqueId: 'b3b6f2a4-6f0e-4d5c-9a0c-5e2f6c1d7a31'
-            };
+            (function () {
+                var pluginUniqueId = 'b3b6f2a4-6f0e-4d5c-9a0c-5e2f6c1d7a31';
+                var page = document.querySelector('#SubtitleQuickEditConfigPage');
+                var submissionsOn = false;
+                var STATES = { Pending: 'Waiting for review', Approved: 'Approved', PartlyApproved: 'Partly approved', Rejected: 'Rejected', Withdrawn: 'Withdrawn by the user' };
+                var OUTCOMES = { Applied: 'applied', Conflict: 'conflict', NotChosen: 'not chosen' };
 
-            document.querySelector('#SubtitleQuickEditConfigPage')
-                .addEventListener('pageshow', function() {
+                function q(selector) {
+                    return page.querySelector(selector);
+                }
+
+                // Everything a user wrote is shown with textContent only.
+                function el(tag, className, text) {
+                    var node = document.createElement(tag);
+
+                    if (className) {
+                        node.className = className;
+                    }
+
+                    if (text !== undefined && text !== null) {
+                        node.textContent = text;
+                    }
+
+                    return node;
+                }
+
+                function time(ms) {
+                    if (typeof ms !== 'number') {
+                        return '';
+                    }
+
+                    var h = Math.floor(ms / 3600000);
+                    var m = Math.floor(ms / 60000) % 60;
+                    var s = Math.floor(ms / 1000) % 60;
+                    var pad = function (n, w) { return String(n).padStart(w, '0'); };
+                    return pad(h, 2) + ':' + pad(m, 2) + ':' + pad(s, 2) + ',' + pad(ms % 1000, 3);
+                }
+
+                function post(path, body) {
+                    return ApiClient.ajax({
+                        type: 'POST',
+                        url: ApiClient.getUrl(path),
+                        data: JSON.stringify(body || {}),
+                        contentType: 'application/json',
+                        dataType: 'json'
+                    });
+                }
+
+                function errorText(err) {
+                    if (err && typeof err.json === 'function') {
+                        return err.json().then(function (b) {
+                            return (b && b.message) || ('The server answered ' + err.status + '.');
+                        }, function () {
+                            return 'The server answered ' + err.status + '.';
+                        });
+                    }
+
+                    return Promise.resolve((err && err.message) || 'The request failed.');
+                }
+
+                // ---- settings ----
+
+                function showUserList() {
+                    q('#UserEditUsers').hidden = q('#UserEdits').value !== 'SelectedUsers';
+                }
+
+                function renderUsers(users, selected) {
+                    var box = q('#UserEditUsers');
+                    box.textContent = '';
+                    var wanted = (selected || []).map(function (id) { return String(id).replace(/-/g, '').toLowerCase(); });
+                    var others = (users || []).filter(function (u) { return !(u.Policy && u.Policy.IsAdministrator); });
+                    if (others.length === 0) {
+                        box.appendChild(el('div', 'fieldDescription', 'There are no users besides admins.'));
+                    }
+
+                    others.forEach(function (u) {
+                        // jellyfin-web upgrades is="emby-checkbox" only from parsed markup (its createElement
+                        // polyfill does not take an options object), so the checkbox is written as HTML and the
+                        // user's name filled in afterwards as text.
+                        var container = el('div', 'checkboxContainer');
+                        container.innerHTML = '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="sqe-user-edit" /><span></span></label>';
+                        var input = container.querySelector('input');
+                        input.setAttribute('data-user-id', u.Id);
+                        input.checked = wanted.indexOf(String(u.Id).replace(/-/g, '').toLowerCase()) >= 0;
+                        container.querySelector('span').textContent = u.Name;
+                        box.appendChild(container);
+                    });
+                    showUserList();
+                }
+
+                function load() {
                     Dashboard.showLoadingMsg();
-                    ApiClient.getPluginConfiguration(SubtitleQuickEditConfig.pluginUniqueId).then(function (config) {
-                        document.querySelector('#AllowUserSubmissions').checked = config.AllowUserSubmissions;
-                        document.querySelector('#MaxPendingSubmissionsPerUser').value = config.MaxPendingSubmissionsPerUser;
-                        document.querySelector('#BackupMode').value = config.BackupMode;
-                        document.querySelector('#BackupKeepLastSaves').value = config.BackupKeepLastSaves;
+                    Promise.all([ApiClient.getPluginConfiguration(pluginUniqueId), ApiClient.getUsers()]).then(function (results) {
+                        var config = results[0];
+                        q('#UserEdits').value = config.UserEdits || 'Off';
+                        try {
+                            renderUsers(results[1], config.UserEditUserIds);
+                        } catch (err) {
+                            console.error('Subtitle Quick Edit: could not list the users', err);
+                        }
+
+                        q('#AllowUserSubmissions').checked = config.AllowUserSubmissions;
+                        q('#MaxPendingSubmissionsPerUser').value = config.MaxPendingSubmissionsPerUser;
+                        q('#BackupMode').value = config.BackupMode;
+                        q('#BackupKeepLastSaves').value = config.BackupKeepLastSaves;
+                        submissionsOn = Boolean(config.AllowUserSubmissions);
+                        Dashboard.hideLoadingMsg();
+                        loadSubmissions();
+                    }, function () {
                         Dashboard.hideLoadingMsg();
                     });
-                });
+                }
 
-            document.querySelector('#SubtitleQuickEditConfigForm')
-                .addEventListener('submit', function(e) {
+                page.addEventListener('pageshow', load);
+                q('#UserEdits').addEventListener('change', showUserList);
+
+                q('#SubtitleQuickEditConfigForm').addEventListener('submit', function (e) {
                     Dashboard.showLoadingMsg();
-                    ApiClient.getPluginConfiguration(SubtitleQuickEditConfig.pluginUniqueId).then(function (config) {
-                        config.AllowUserSubmissions = document.querySelector('#AllowUserSubmissions').checked;
-                        config.MaxPendingSubmissionsPerUser = parseInt(document.querySelector('#MaxPendingSubmissionsPerUser').value, 10);
-                        config.BackupMode = document.querySelector('#BackupMode').value;
-                        config.BackupKeepLastSaves = parseInt(document.querySelector('#BackupKeepLastSaves').value, 10);
-                        ApiClient.updatePluginConfiguration(SubtitleQuickEditConfig.pluginUniqueId, config).then(function (result) {
+                    ApiClient.getPluginConfiguration(pluginUniqueId).then(function (config) {
+                        config.UserEdits = q('#UserEdits').value;
+                        config.UserEditUserIds = Array.prototype.map.call(page.querySelectorAll('.sqe-user-edit:checked'), function (input) {
+                            return input.getAttribute('data-user-id');
+                        });
+                        config.AllowUserSubmissions = q('#AllowUserSubmissions').checked;
+                        config.MaxPendingSubmissionsPerUser = parseInt(q('#MaxPendingSubmissionsPerUser').value, 10);
+                        config.BackupMode = q('#BackupMode').value;
+                        config.BackupKeepLastSaves = parseInt(q('#BackupKeepLastSaves').value, 10);
+                        ApiClient.updatePluginConfiguration(pluginUniqueId, config).then(function (result) {
+                            submissionsOn = Boolean(config.AllowUserSubmissions);
                             Dashboard.processPluginConfigurationUpdateResult(result);
+                            loadSubmissions();
                         });
                     });
 
                     e.preventDefault();
                     return false;
                 });
+
+                // ---- submissions ----
+
+                function changeItem(edit, index, pending) {
+                    var item = el('li', 'sqe-sub-change');
+                    if (pending) {
+                        var pick = el('input', 'sqe-pick');
+                        pick.type = 'checkbox';
+                        pick.checked = true;
+                        pick.setAttribute('data-index', String(index));
+                        pick.setAttribute('aria-label', 'Apply change ' + (index + 1));
+                        item.appendChild(pick);
+                    }
+
+                    var body = el('div');
+                    if (edit.type === 'add') {
+                        body.appendChild(el('div', 'sqe-where', 'New line · ' + time(edit.startMs) + ' → ' + time(edit.endMs)));
+                        body.appendChild(el('div', 'sqe-new', edit.text));
+                    } else {
+                        body.appendChild(el('div', 'sqe-where', 'Line ' + edit.cueIndex + ' · ' + time(edit.cueStart)));
+                        body.appendChild(el('div', 'sqe-old', edit.oldText));
+                        body.appendChild(el('div', 'sqe-new', edit.newText));
+                    }
+
+                    if (edit.outcome && edit.outcome !== 'Pending') {
+                        body.appendChild(el('div', 'sqe-outcome' + (edit.outcome === 'Conflict' ? ' sqe-conflict' : ''),
+                            (OUTCOMES[edit.outcome] || edit.outcome) + (edit.message ? ': ' + edit.message : '')));
+                    }
+
+                    item.appendChild(body);
+                    return item;
+                }
+
+                function renderSubmission(sub) {
+                    var pending = sub.state === 'Pending';
+                    var box = el('section', 'sqe-sub');
+                    box.setAttribute('data-submission-id', sub.id);
+                    var title = el('h3', 'sqe-sub-title');
+                    var link = el('a', null, sub.itemName || 'An item no longer in the library');
+                    link.href = '#/details?id=' + encodeURIComponent(sub.itemId);
+                    title.appendChild(link);
+                    if (sub.streamLabel) {
+                        title.appendChild(document.createTextNode(' · ' + sub.streamLabel));
+                    }
+
+                    box.appendChild(title);
+                    var meta = (sub.userName || 'A user') + ' · ' + (sub.created ? new Date(sub.created).toLocaleString() : '') + ' · ' + (STATES[sub.state] || sub.state);
+                    if (!pending && sub.decidedBy) {
+                        meta += ' by ' + sub.decidedBy + (sub.decided ? ', ' + new Date(sub.decided).toLocaleString() : '');
+                    }
+
+                    box.appendChild(el('p', 'sqe-sub-meta', meta));
+                    if (sub.note) {
+                        box.appendChild(el('p', 'sqe-sub-note', 'Note: ' + sub.note));
+                    }
+
+                    if (sub.reason) {
+                        box.appendChild(el('p', 'sqe-sub-note', 'Reason: ' + sub.reason));
+                    }
+
+                    var changes = el('ul', 'sqe-sub-changes');
+                    (sub.edits || []).forEach(function (edit, i) {
+                        changes.appendChild(changeItem(edit, i, pending));
+                    });
+                    box.appendChild(changes);
+                    var result = el('p', 'sqe-sub-result');
+                    result.hidden = true;
+                    if (pending && submissionsOn) {
+                        var actions = el('div', 'sqe-sub-actions');
+                        var approve = el('button', 'raised button-submit emby-button sqe-approve', 'Approve selected');
+                        approve.type = 'button';
+                        var reason = el('input', 'sqe-reason');
+                        reason.type = 'text';
+                        reason.maxLength = 500;
+                        reason.placeholder = 'Reason, shown to the user (optional)';
+                        reason.setAttribute('aria-label', 'Reason for rejecting');
+                        var reject = el('button', 'raised emby-button sqe-reject', 'Reject');
+                        reject.type = 'button';
+                        approve.addEventListener('click', function () {
+                            var chosen = Array.prototype.map.call(box.querySelectorAll('.sqe-pick:checked'), function (c) {
+                                return parseInt(c.getAttribute('data-index'), 10);
+                            });
+                            if (chosen.length === 0) {
+                                showResult(result, 'Tick at least one change to approve, or reject the submission.', true);
+                                return;
+                            }
+
+                            decide(box, result, 'Approve', { edits: chosen.length === (sub.edits || []).length ? null : chosen });
+                        });
+                        reject.addEventListener('click', function () {
+                            decide(box, result, 'Reject', { reason: reason.value.trim() || null });
+                        });
+                        actions.appendChild(approve);
+                        actions.appendChild(reason);
+                        actions.appendChild(reject);
+                        box.appendChild(actions);
+                    }
+
+                    box.appendChild(result);
+                    return box;
+                }
+
+                function showResult(node, text, isError) {
+                    node.hidden = false;
+                    node.textContent = text;
+                    node.classList.toggle('sqe-error', Boolean(isError));
+                }
+
+                function decide(box, result, action, body) {
+                    var id = box.getAttribute('data-submission-id');
+                    box.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+                    post('SubtitleQuickEdit/Submissions/' + encodeURIComponent(id) + '/' + action, body).then(function (answer) {
+                        if (action === 'Approve' && answer && !answer.applied) {
+                            // Nothing fitted the file: show the conflicts and leave it pending.
+                            var fresh = renderSubmission(answer.submission);
+                            box.replaceWith(fresh);
+                            showResult(fresh.querySelector('.sqe-sub-result'), 'Nothing was written: none of the chosen changes fit the file any more (see the conflicts). Reject it, or ask the user to submit again.', true);
+                            return;
+                        }
+
+                        var sub = action === 'Approve' ? answer.submission : answer;
+                        var done = renderSubmission(sub);
+                        box.replaceWith(done);
+                        showResult(done.querySelector('.sqe-sub-result'), action === 'Approve'
+                            ? (sub.state === 'Approved' ? 'Approved: the changes are in the file.' : 'Partly approved: the applied changes are in the file.')
+                            : 'Rejected.');
+                        updateCount();
+                    }, function (err) {
+                        return errorText(err).then(function (message) {
+                            box.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
+                            showResult(result, 'Not done: ' + message, true);
+                        });
+                    });
+                }
+
+                function updateCount() {
+                    if (q('#SqeReviewStatus').value !== 'pending') {
+                        return;
+                    }
+
+                    var left = Array.prototype.filter.call(page.querySelectorAll('#SqeReviewList .sqe-sub'), function (box) {
+                        return box.querySelector('.sqe-approve');
+                    }).length;
+                    q('#SqeReviewTitle').textContent = left > 0 ? 'Submissions (' + left + ' waiting)' : 'Submissions';
+                }
+
+                function loadSubmissions() {
+                    var status = q('#SqeReviewStatus').value;
+                    var list = q('#SqeReviewList');
+                    ApiClient.getJSON(ApiClient.getUrl('SubtitleQuickEdit/Submissions', { status: status })).then(function (subs) {
+                        list.textContent = '';
+                        subs = subs || [];
+                        q('#SqeReviewOff').hidden = submissionsOn || status !== 'pending' || subs.length === 0;
+                        q('#SqeReviewEmpty').hidden = subs.length > 0;
+                        q('#SqeReviewEmpty').textContent = status === 'pending' ? 'No submissions are waiting for review.' : 'No decided submissions.';
+                        subs.forEach(function (sub) {
+                            list.appendChild(renderSubmission(sub));
+                        });
+                        q('#SqeReviewTitle').textContent = status === 'pending' && subs.length > 0 ? 'Submissions (' + subs.length + ' waiting)' : 'Submissions';
+                    }, function (err) {
+                        errorText(err).then(function (message) {
+                            list.textContent = '';
+                            list.appendChild(el('p', 'sqe-error', 'Could not load the submissions: ' + message));
+                        });
+                    });
+                }
+
+                q('#SqeReviewStatus').addEventListener('change', loadSubmissions);
+            }());
         </script>
     </div>
 </body>
