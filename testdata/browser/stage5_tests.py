@@ -329,8 +329,8 @@ def admin_ass(browser, pages):
         box.press("Control+Enter")
         page.wait_for_timeout(300)
         if drew == "none":
-            check("ass: the staged note says Reload shows it after Save (the player draws ASS itself)",
-                  "Reload subtitles then shows it" in status(page), status(page))
+            check("ass: the staged note says the player keeps the old text until Save and Reload (it draws ASS itself)",
+                  "Save, then Reload subtitles" in status(page), status(page))
         else:
             check("ass: the staged note says it is shown in the player", "shown in the player" in status(page), status(page))
         box.press("Control+s")

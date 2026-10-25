@@ -545,10 +545,12 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   checks['jassub: the editor opens for ASS drawn on a canvas'] = (await j.inputValue('.sqe-cue-text')) === 'Hello there';
   await j.fill('.sqe-cue-text', 'Hello canvas');
   await j.keyboard.press('Control+Enter');
-  checks['jassub: the staged note says Save and Reload show it'] =
-    (await j.$eval('.sqe-status', (e) => e.textContent)).indexOf('Reload subtitles then shows it') >= 0;
+  checks['jassub: the staged note says the player keeps the old text until Save and Reload'] =
+    (await j.$eval('.sqe-status', (e) => e.textContent)).indexOf('keeps showing the old text for now: Save, then Reload subtitles') >= 0;
   await j.keyboard.press('Control+s');
   await j.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Saved') === 0, null, { timeout: 5000 });
+  checks['jassub: after Save the note points to Reload subtitles'] =
+    (await j.$eval('.sqe-status', (e) => e.textContent)).indexOf('Reload subtitles shows it in the player.') > 0;
   await j.click('.sqe-reload');
   await j.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Subtitles reloaded') === 0, null, { timeout: 12000 })
     .catch(() => null);

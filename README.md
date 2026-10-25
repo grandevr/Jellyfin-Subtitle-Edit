@@ -58,7 +58,7 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
   the test is there to catch.
 - Install on the test server only: build the plugin straight into its plugin folder
   (`DOCKER_FLAGS="-v $SQE_TEST_ROOT/config/data/plugins:/plugins" devtools/dotnet.sh build
-  src/Jellyfin.Plugin.SubtitleQuickEdit -c Release -o /plugins/SubtitleQuickEdit_1.2.1.0`, after removing any older `SubtitleQuickEdit_*` folder) and restart the container.
+  src/Jellyfin.Plugin.SubtitleQuickEdit -c Release -o /plugins/SubtitleQuickEdit_1.2.2.0`, after removing any older `SubtitleQuickEdit_*` folder) and restart the container.
   Jellyfin writes its own `meta.json`. `UtfUnknown.dll` is not shipped: the plugin uses the copy Jellyfin already has.
 - API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>` resets the fixtures and runs 75 checks against the
   test server (see below).
@@ -71,7 +71,7 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
 - `devtools/mutation_check.py` breaks the code in scratch copies (38 ways) and requires the unit tests to fail for each break.
 - Client, no server needed: `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js` (181 tests),
   `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` (54 of 54 killed), and with Playwright for
-  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (91 checks against a fake jellyfin-web page, as admin, submitter and a user without rights, with an ASS file drawn as text or by JASSUB, and with a track inside the video), and
+  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (92 checks against a fake jellyfin-web page, as admin, submitter and a user without rights, with an ASS file drawn as text or by JASSUB, and with a track inside the video), and
   `node testdata/browser/config_page_smoke.js` (18 checks of the settings page with a mock server).
 - Client against the test server: `testdata/browser/stage3_tests.py` (see its header; also the stage 4 user modes, which
   change the plugin settings and put the defaults back). It needs the TestWebm library and
