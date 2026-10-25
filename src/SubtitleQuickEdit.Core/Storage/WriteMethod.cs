@@ -10,4 +10,7 @@ public enum WriteMethod
 
     /// <summary>The group or owner could not be matched, so the verified content was copied over the original in place.</summary>
     InPlaceCopy,
+
+    /// <summary>A new file was created from a verified temp file; no existing file was touched.</summary>
+    Created,
 }

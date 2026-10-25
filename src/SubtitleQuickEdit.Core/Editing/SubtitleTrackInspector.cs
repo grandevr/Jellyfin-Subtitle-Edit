@@ -51,11 +51,18 @@ public static class SubtitleTrackInspector
             return new TrackInspection(null, "The subtitle file could not be read: " + ex.Message);
         }
 
-        return Parse(known, data);
+        return InspectContent(known, data);
     }
 
-    private static TrackInspection Parse(SubtitleFormat format, byte[] data)
+    /// <summary>
+    /// Parses subtitle content that is not (yet) a file, with the parser for <paramref name="format"/>.
+    /// </summary>
+    /// <param name="format">The format.</param>
+    /// <param name="data">The content.</param>
+    /// <returns>The parsed content, or the reason it is not editable.</returns>
+    public static TrackInspection InspectContent(SubtitleFormat format, byte[] data)
     {
+        ArgumentNullException.ThrowIfNull(data);
         switch (format)
         {
             case SubtitleFormat.Srt:

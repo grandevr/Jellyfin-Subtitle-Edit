@@ -23,12 +23,18 @@ namespace SubtitleQuickEdit.Core.Storage;
 /// <c>…_restore.srt</c> files are restore points: the content at the start of an editing session, kept whatever the
 /// mode (the newest three per subtitle) so that the editor's "Revert to original" can go back to it.
 /// </para>
+/// <para>
+/// <c>…_replaced.srt</c> and <c>…_deleted.srt</c> files are subtitle files that an extracted copy replaced, and
+/// extracted copies that an admin deleted. They are never pruned.
+/// </para>
 /// </summary>
 public sealed partial class BackupStore
 {
     private const string OriginalKind = "original";
     private const string SaveKind = "save";
     private const string RestorePointKind = "restore";
+    private const string ReplacedKind = "replaced";
+    private const string DeletedKind = "deleted";
     private const int RestorePointsKept = 3;
 
     private readonly string folder;
@@ -143,6 +149,30 @@ public sealed partial class BackupStore
     }
 
     /// <summary>
+    /// Keeps a subtitle file that is about to be replaced by an extracted copy of an embedded track. Never pruned.
+    /// </summary>
+    /// <param name="itemId">The library item id (hex, as in Jellyfin's item ids).</param>
+    /// <param name="streamIndex">The file's own subtitle stream index, or -1 when it is not in the library.</param>
+    /// <param name="subtitlePath">The file's path.</param>
+    /// <param name="content">The exact bytes about to be replaced.</param>
+    /// <returns>The backup file.</returns>
+    /// <exception cref="SubtitleWriteException">The backup could not be written. The file must not be replaced.</exception>
+    public string KeepReplaced(string itemId, int streamIndex, string subtitlePath, byte[] content) =>
+        KeepForever(itemId, streamIndex, subtitlePath, content, ReplacedKind);
+
+    /// <summary>
+    /// Keeps an extracted subtitle file that is about to be deleted. Never pruned.
+    /// </summary>
+    /// <param name="itemId">The library item id (hex, as in Jellyfin's item ids).</param>
+    /// <param name="streamIndex">The file's own subtitle stream index, or -1 when it is not in the library.</param>
+    /// <param name="subtitlePath">The file's path.</param>
+    /// <param name="content">The exact bytes about to be deleted.</param>
+    /// <returns>The backup file.</returns>
+    /// <exception cref="SubtitleWriteException">The backup could not be written. The file must not be deleted.</exception>
+    public string KeepDeleted(string itemId, int streamIndex, string subtitlePath, byte[] content) =>
+        KeepForever(itemId, streamIndex, subtitlePath, content, DeletedKind);
+
+    /// <summary>
     /// Finds a kept version of a subtitle (an original, an earlier save or a restore point) by the SHA-256 of its
     /// content, newest first.
     /// </summary>
@@ -174,6 +204,26 @@ public sealed partial class BackupStore
         }
 
         return null;
+    }
+
+    private string KeepForever(string itemId, int streamIndex, string subtitlePath, byte[] content, string kind)
+    {
+        ArgumentNullException.ThrowIfNull(subtitlePath);
+        ArgumentNullException.ThrowIfNull(content);
+        string key = Key(itemId, streamIndex, subtitlePath);
+        try
+        {
+            Directory.CreateDirectory(folder);
+            return WriteNew(key, kind, Extension(subtitlePath), content);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw NotWritable(ex);
+        }
+        catch (IOException ex)
+        {
+            throw IoFailure(ex);
+        }
     }
 
     [GeneratedRegex("^[0-9a-fA-F-]{1,64}$", RegexOptions.CultureInvariant)]

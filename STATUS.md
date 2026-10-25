@@ -1,4 +1,4 @@
-# Subtitle Editor: status (1.0 live since 2026-10-25; stage 5 = 1.1 in progress)
+# Subtitle Editor: status (1.1 live since 2026-10-25; stage 6 = 1.2 in progress)
 
 Spec: the "Jellyfin Subtitle Quick-Edit Plugin — Spec" doc (claude.ai artifact YP25tXFeL6JFKs3i32VdNx). Read it again
 before resuming: it is the source of truth and was updated after every stage. 1.0 (stages 0 to 4, main ff112ca) runs
@@ -66,9 +66,12 @@ Jellyfin on the test host.
 ## Next
 
 Plan approved 2026-10-25 (the plan doc "Subtitle Quick Edit 1.1: VTT, ASS and embedded extract"):
-1. Stage 5 = 1.1: 5a version 1.1.0.0 and the format-neutral core (`Subtitles/`); 5b WebVTT; 5c ASS/SSA; 5d API, player,
-   "Show style tags" toggle, Reload check for VTT and ASS; 5e release (live update only with approval).
-2. Stage 6 = 1.2: extract embedded text tracks to a file next to the video, released separately.
+1. Stage 5 = 1.1 (WebVTT, ASS/SSA, "Show style tags", rename to "Subtitle Editor"): done, live since 2026-10-25.
+2. Stage 6 = 1.2: extract embedded text tracks to a file next to the video, in their own format.
+   - 6a (Core, `Extraction/`): file naming (`Video.en[.default][.forced][.sdh].ext`), `SafeFileWriter.Create` (never
+     overwrites), `_replaced` and `_deleted` backups (never pruned), the extracted-files list, `SubtitleExtractor`.
+   - 6b: the extract, preview and delete endpoints, item refresh. 6c: the player panel and the Submissions review.
+   - 6d: release (live update only with approval).
 3. Keep the Playwright image on the test host until the user says the whole project is finished.
 
 ## Open decisions
