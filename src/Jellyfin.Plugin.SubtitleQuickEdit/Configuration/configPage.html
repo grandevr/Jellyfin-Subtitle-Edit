@@ -83,6 +83,15 @@
                     <p id="SqeReviewEmpty" class="fieldDescription" hidden></p>
                     <div id="SqeReviewList"></div>
                 </div>
+
+                <div id="SqeExtracted">
+                    <div class="sqe-review-head">
+                        <h2 id="SqeExtractedTitle">Editable copies</h2>
+                    </div>
+                    <p class="fieldDescription">Subtitle files made from subtitle tracks inside a video, so they could be edited. The track inside the video is never changed. Deleting a copy keeps its last content in the backups.</p>
+                    <p id="SqeExtractedEmpty" class="fieldDescription" hidden>No editable copies have been made.</p>
+                    <div id="SqeExtractedList"></div>
+                </div>
             </div>
         </div>
         <script type="text/javascript">
@@ -194,6 +203,7 @@
                         submissionsOn = Boolean(config.AllowUserSubmissions);
                         Dashboard.hideLoadingMsg();
                         loadSubmissions();
+                        loadExtracted();
                     }, function () {
                         Dashboard.hideLoadingMsg();
                     });
@@ -386,6 +396,70 @@
                         errorText(err).then(function (message) {
                             list.textContent = '';
                             list.appendChild(el('p', 'sqe-error', 'Could not load the submissions: ' + message));
+                        });
+                    });
+                }
+
+                // ---- editable copies of subtitle tracks inside videos ----
+
+                function renderExtracted(file) {
+                    var box = el('section', 'sqe-sub sqe-copy');
+                    box.setAttribute('data-extracted-id', file.id);
+                    var title = el('h3', 'sqe-sub-title');
+                    var link = el('a', null, file.itemName || 'An item no longer in the library');
+                    link.href = '#/details?id=' + encodeURIComponent(file.itemId);
+                    title.appendChild(link);
+                    title.appendChild(document.createTextNode(' · ' + file.fileName));
+                    box.appendChild(title);
+                    var state = !file.exists ? 'the file is gone' : file.edited ? 'edited since' : 'not edited since';
+                    box.appendChild(el('p', 'sqe-sub-meta', (file.userName || 'A user') + ' · ' + (file.created ? new Date(file.created).toLocaleString() : '') +
+                        ' · ' + state + (file.replaced ? ' · replaced the file that was there (kept in the backups)' : '')));
+                    var result = el('p', 'sqe-sub-result');
+                    result.hidden = true;
+                    var actions = el('div', 'sqe-sub-actions');
+                    var del = el('button', 'raised emby-button sqe-delete-copy', 'Delete copy');
+                    del.type = 'button';
+                    del.addEventListener('click', function () {
+                        if (del.getAttribute('data-confirm') !== '1') {
+                            del.setAttribute('data-confirm', '1');
+                            del.textContent = 'Click again to delete';
+                            return;
+                        }
+
+                        del.disabled = true;
+                        ApiClient.ajax({
+                            type: 'DELETE',
+                            url: ApiClient.getUrl('SubtitleQuickEdit/Extracted/' + encodeURIComponent(file.id)),
+                            dataType: 'json'
+                        }).then(function (answer) {
+                            actions.remove();
+                            showResult(result, answer && answer.backedUp ? 'Deleted. Its last content is in the backups.' : 'Removed from the list (the file was already gone).');
+                        }, function (err) {
+                            return errorText(err).then(function (message) {
+                                del.disabled = false;
+                                showResult(result, 'Not deleted: ' + message, true);
+                            });
+                        });
+                    });
+                    actions.appendChild(del);
+                    box.appendChild(actions);
+                    box.appendChild(result);
+                    return box;
+                }
+
+                function loadExtracted() {
+                    var list = q('#SqeExtractedList');
+                    ApiClient.getJSON(ApiClient.getUrl('SubtitleQuickEdit/Extracted')).then(function (files) {
+                        list.textContent = '';
+                        files = files || [];
+                        q('#SqeExtractedEmpty').hidden = files.length > 0;
+                        files.forEach(function (file) {
+                            list.appendChild(renderExtracted(file));
+                        });
+                    }, function (err) {
+                        errorText(err).then(function (message) {
+                            list.textContent = '';
+                            list.appendChild(el('p', 'sqe-error', 'Could not load the editable copies: ' + message));
                         });
                     });
                 }

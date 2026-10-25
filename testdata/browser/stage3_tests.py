@@ -219,7 +219,7 @@ def admin_desktop(browser, pages):
     check("Esc did not leave the player",
           page.evaluate("() => Boolean(document.querySelector('video.htmlvideoplayer'))"))
 
-    # An embedded track (button hidden), then the .vtt and the .srt (button shown).
+    # An embedded text track (1.2: the button offers an editable copy), then the .vtt and the .srt (the edit button).
     movie3 = MOVIES["TestWebm 03"]
     play(page, movie3)
     t3 = tracks(movie3)
@@ -228,7 +228,11 @@ def admin_desktop(browser, pages):
     srt = [t for t in t3 if t["external"] and t["format"] == "srt" and t["editable"]]
     if embedded:
         choose_subtitle(page, embedded[0]["streamIndex"])
-        check("button hidden for an embedded subtitle", wait_button(page, False, 4) and not wait_button(page, True, 3))
+        label = None
+        if wait_button(page, True, 6):
+            label = page.evaluate("() => document.querySelector('.sqe-edit-button').getAttribute('aria-label')")
+        check("an embedded text subtitle gets the button, offering an editable copy (1.2)",
+              label == "Make this subtitle editable", "label %r" % label)
     else:
         check("movie 3 has an embedded subtitle track", False, "none found")
     if vtt:
@@ -237,9 +241,8 @@ def admin_desktop(browser, pages):
     else:
         check("movie 3 has an external .vtt track", False, "none found")
     if srt:
-        if embedded:  # hide the button again, so the .srt check sees it appear
-            choose_subtitle(page, embedded[0]["streamIndex"])
-            wait_button(page, False, 4)
+        choose_subtitle(page, -1)  # hide the button again, so the .srt check sees it appear
+        wait_button(page, False, 4)
         choose_subtitle(page, srt[0]["streamIndex"])
         check("button appears after switching to the .srt", wait_button(page, True, 6))
     choose_subtitle(page, -1)

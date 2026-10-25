@@ -21,6 +21,9 @@ public enum SubtitleWriteError
 
     /// <summary>Another I/O problem.</summary>
     Io,
+
+    /// <summary>A new file was to be created, but a file of that name already exists. HTTP 409. Nothing was written.</summary>
+    AlreadyExists,
 }
 
 /// <summary>
@@ -33,7 +36,7 @@ public sealed class SubtitleWriteException : Exception
     /// </summary>
     /// <param name="error">The reason.</param>
     /// <param name="message">A message fit to show to the user.</param>
-    /// <param name="currentHash">For conflicts, the file's current hash.</param>
+    /// <param name="currentHash">For conflicts and existing files, the file's current hash.</param>
     /// <param name="leftoverPath">A file left on disk that holds the intended content or needs attention.</param>
     /// <param name="innerException">The underlying exception, if any.</param>
     public SubtitleWriteException(
@@ -55,7 +58,7 @@ public sealed class SubtitleWriteException : Exception
     public SubtitleWriteError Error { get; }
 
     /// <summary>
-    /// Gets the file's current hash for <see cref="SubtitleWriteError.Conflict"/>.
+    /// Gets the file's current hash for <see cref="SubtitleWriteError.Conflict"/> and <see cref="SubtitleWriteError.AlreadyExists"/>.
     /// </summary>
     public string? CurrentHash { get; }
 

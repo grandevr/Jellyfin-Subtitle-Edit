@@ -166,6 +166,86 @@ public sealed class SafeFileWriter
     }
 
     /// <summary>
+    /// Creates <paramref name="path"/> with <paramref name="content"/>. An existing file of that name is never
+    /// touched: the verified temp file is moved to the name only if nothing is there.
+    /// </summary>
+    /// <param name="path">The new file.</param>
+    /// <param name="content">Its complete content.</param>
+    /// <param name="ownership">The owner, group and mode the new file should get (usually the video's), or null to keep the process's.</param>
+    /// <returns>How the write went. When the owner or group could not be set, the file is kept and a note says so.</returns>
+    /// <exception cref="SubtitleWriteException">The write was refused (<see cref="SubtitleWriteError.AlreadyExists"/>) or failed.</exception>
+    public WriteOutcome Create(string path, ReadOnlyMemory<byte> content, FileOwnership? ownership)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        string full = Path.GetFullPath(path);
+        lock (Gates.GetOrAdd(full, static _ => new object()))
+        {
+            var notes = new List<string>();
+            RecoverLocked(full, notes);
+            if (File.Exists(full))
+            {
+                throw Exists(full);
+            }
+
+            byte[] bytes = content.ToArray();
+            string newHash = SubtitleHash.Compute(bytes);
+            string temp = WriterPath(full, newHash, TempExtension);
+
+            WriteTemp(full, temp, bytes);
+            try
+            {
+                Notify(WriteStage.TempWritten);
+                if (!string.Equals(HashOf(File.ReadAllBytes(temp)), newHash, StringComparison.Ordinal))
+                {
+                    throw new SubtitleWriteException(
+                        SubtitleWriteError.VerificationFailed,
+                        "The temporary file did not read back correctly. No subtitle file was created.");
+                }
+
+                Notify(WriteStage.TempVerified);
+                if (ownership is not null && !metadata.TryMatch(temp, ownership.Value))
+                {
+                    notes.Add("The owner or group of '" + Path.GetFileName(full) + "' could not be set to match the video's; it is owned by '"
+                        + Environment.UserName + "'.");
+                }
+
+                Notify(WriteStage.BeforeRename);
+                try
+                {
+                    File.Move(temp, full, overwrite: false);
+                }
+                catch (IOException) when (File.Exists(full))
+                {
+                    throw Exists(full);
+                }
+
+                SyncFolder(full, notes);
+            }
+            catch (SubtitleWriteException)
+            {
+                DeleteQuietly(temp);
+                throw;
+            }
+            catch (IOException ex)
+            {
+                DeleteQuietly(temp);
+                throw new SubtitleWriteException(SubtitleWriteError.Io, "Could not create the subtitle file: " + ex.Message, innerException: ex);
+            }
+
+            string written = HashOf(ReadTarget(full));
+            if (!string.Equals(written, newHash, StringComparison.Ordinal))
+            {
+                throw new SubtitleWriteException(
+                    SubtitleWriteError.VerificationFailed,
+                    "The new subtitle file did not read back correctly after it was created.");
+            }
+
+            return new WriteOutcome(WriteMethod.Created, newHash, notes);
+        }
+    }
+
+    /// <summary>
     /// Resolves leftovers from an interrupted save of <paramref name="path"/>: removes stale temp files and
     /// resumes or cleans up an interrupted in-place copy. <see cref="Write"/> does this itself first.
     /// </summary>
@@ -186,6 +266,28 @@ public sealed class SafeFileWriter
 
     private static SubtitleWriteException Conflict(string currentHash) =>
         new(SubtitleWriteError.Conflict, "The subtitle file changed on disk since it was loaded.", currentHash: currentHash);
+
+    private static SubtitleWriteException Exists(string full)
+    {
+        string? currentHash = null;
+        try
+        {
+            currentHash = HashOf(File.ReadAllBytes(full));
+        }
+        catch (IOException)
+        {
+            // The hash is only a hint for the caller.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Same.
+        }
+
+        return new SubtitleWriteException(
+            SubtitleWriteError.AlreadyExists,
+            "A file named '" + Path.GetFileName(full) + "' already exists next to the video.",
+            currentHash: currentHash);
+    }
 
     private static string HashOf(byte[] content) => SubtitleHash.Compute(content);
 
