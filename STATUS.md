@@ -79,7 +79,10 @@ Jellyfin or touched on the live Bazarr. All work is on a throwaway Jellyfin on t
 ## Test server (the test host, throwaway)
 
 - Container `jellyfin-test` (`--restart no`), LAN-only port 8097, image pinned by digest to the live image
-  (`lscr.io/linuxserver/jellyfin@sha256:799509f8ef3be7037478699cc6fd14d19dd75faac5e474ed219e98ae78a5b3e4`, 12.2.0). UPnP is off.
+  (`lscr.io/linuxserver/jellyfin@sha256:4212ca390fbc6bd5002048d2d2ce2b8a5b1ad278ec4cbabe6519869117404308`, 12.3.0, build
+  12.3ubu2604-ls56; upgraded from 12.2.0 on 2026-10-25, all suites green after). UPnP is off. It is a plain `docker run`
+  container, no compose file; recreate it with (run from the test host, paths as on the test host):
+  `docker run -d --name jellyfin-test --restart no --memory 2g --cpus 2 -p 8097:8096 -e PUID=1000 -e PGID=104 -e TZ=Etc/UTC -v $SQE_TEST_ROOT/config:/config -v $SQE_TEST_ROOT/media:/data lscr.io/linuxserver/jellyfin@sha256:4212ca390fbc6bd5002048d2d2ce2b8a5b1ad278ec4cbabe6519869117404308`
   Also pulled: `mcr.microsoft.com/dotnet/sdk:10.0`.
 - Folders: `$SQE_TEST_ROOT/config` (Jellyfin config and plugins), `$SQE_TEST_ROOT/media` (test videos and subtitles),
   `$SQE_TEST_ROOT/src` (`sqe`: synced copy of the source; `.nuget`: package cache; `template-bump`: the stage 0 template
