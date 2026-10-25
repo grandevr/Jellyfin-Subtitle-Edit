@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Text;
 using System.Text.RegularExpressions;
 using SubtitleQuickEdit.Core.Subtitles;
 
@@ -23,49 +22,15 @@ internal static class SrtParser
 
     internal static SrtParseResult Parse(byte[] data)
     {
-        if (data.Length == 0)
+        DecodedText? decoded = DecodedText.Decode(data, out string? failure);
+        if (decoded is null)
         {
-            return SrtParseResult.Fail("The file is empty.");
+            return SrtParseResult.Fail(failure!);
         }
 
-        if (data.Length > SubtitleLimits.MaxFileBytes)
-        {
-            return SrtParseResult.Fail("The file is too large to edit.");
-        }
-
-        SubtitleEncoding? encoding = SubtitleEncoding.Detect(data);
-        if (encoding is null)
-        {
-            return SrtParseResult.Fail("The text encoding could not be determined or is not supported.");
-        }
-
-        ReadOnlySpan<byte> body = data.AsSpan(encoding.BomLength);
-        string text;
-        try
-        {
-            text = encoding.Encoding.GetString(body);
-            byte[] again = encoding.Encoding.GetBytes(text);
-            if (!again.AsSpan().SequenceEqual(body))
-            {
-                return SrtParseResult.Fail("The file does not survive a decode and re-encode in its detected encoding (" + encoding.Name + ").");
-            }
-        }
-        catch (DecoderFallbackException)
-        {
-            return SrtParseResult.Fail("The file contains bytes that are not valid in its detected encoding (" + encoding.Name + ").");
-        }
-        catch (EncoderFallbackException)
-        {
-            return SrtParseResult.Fail("The file does not survive a decode and re-encode in its detected encoding (" + encoding.Name + ").");
-        }
-
-        int[] byteOffsets = BuildByteOffsets(text, encoding.Encoding);
-        if (byteOffsets[text.Length] != body.Length)
-        {
-            return SrtParseResult.Fail("The file's byte layout could not be mapped reliably.");
-        }
-
-        List<Line> lines = ScanLines(text, out string lineEnding);
+        string text = decoded.Text;
+        SubtitleEncoding encoding = decoded.Encoding;
+        IReadOnlyList<TextLine> lines = decoded.Lines;
         LineKind[] kinds = new LineKind[lines.Count];
         long[] starts = new long[lines.Count];
         long[] ends = new long[lines.Count];
@@ -109,7 +74,7 @@ internal static class SrtParser
             }
 
             bool precededByBlank = cues.Count == 0 || (index > 0 && kinds[index - 1] == LineKind.Blank);
-            Line time = lines[timeLine];
+            TextLine time = lines[timeLine];
             bool timeTerminated = time.TermEnd > time.End;
             bool textEmpty = end == timeLine + 1;
             int textStart;
@@ -133,7 +98,7 @@ internal static class SrtParser
             int? number = null;
             if (numberLine >= 0)
             {
-                Line nl = lines[numberLine];
+                TextLine nl = lines[numberLine];
                 int a = nl.Start;
                 int b = nl.End;
                 while (a < b && char.IsWhiteSpace(text[a]))
@@ -181,36 +146,15 @@ internal static class SrtParser
             return SrtParseResult.Fail("The file contains no cues.");
         }
 
-        int tail = 0;
-        if (lines[lastContentLine].TermEnd > lines[lastContentLine].End)
-        {
-            tail++;
-        }
-
-        for (int i = lastContentLine + 1; i < lines.Count; i++)
-        {
-            if (lines[i].TermEnd > lines[i].End)
-            {
-                tail++;
-            }
-        }
-
-        return SrtParseResult.Ok(SrtDocument.Create(data, encoding, lineEnding, cues, byteOffsets, tail));
+        int tail = decoded.TailTerminators(lastContentLine);
+        return SrtParseResult.Ok(SrtDocument.Create(data, encoding, decoded.LineEnding, cues, decoded.ByteOffsets, tail));
     }
-
-    /// <summary>
-    /// Replaces any line break style with a single <c>\n</c>.
-    /// </summary>
-    /// <param name="value">The text.</param>
-    /// <returns>The text with <c>\n</c> breaks.</returns>
-    internal static string NormalizeBreaks(string value) =>
-        value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
     private static bool StartsCue(LineKind[] kinds, int i) =>
         kinds[i] == LineKind.Time
         || (kinds[i] == LineKind.Digits && i + 1 < kinds.Length && kinds[i + 1] == LineKind.Time);
 
-    private static LineKind Classify(string text, Line line, out long startMs, out long endMs)
+    private static LineKind Classify(string text, TextLine line, out long startMs, out long endMs)
     {
         startMs = 0;
         endMs = 0;
@@ -259,104 +203,4 @@ internal static class SrtParser
         long ms = long.Parse(fraction, CultureInfo.InvariantCulture);
         return (h * 3_600_000) + (m * 60_000) + (s * 1000) + ms;
     }
-
-    private static List<Line> ScanLines(string text, out string lineEnding)
-    {
-        var lines = new List<Line>();
-        int crlf = 0;
-        int lf = 0;
-        int cr = 0;
-        int i = 0;
-        while (i < text.Length)
-        {
-            int start = i;
-            while (i < text.Length && text[i] != '\r' && text[i] != '\n')
-            {
-                i++;
-            }
-
-            int end = i;
-            if (i < text.Length)
-            {
-                if (text[i] == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
-                {
-                    i += 2;
-                    crlf++;
-                }
-                else if (text[i] == '\r')
-                {
-                    i++;
-                    cr++;
-                }
-                else
-                {
-                    i++;
-                    lf++;
-                }
-            }
-
-            lines.Add(new Line(start, end, i));
-        }
-
-        if (crlf > lf && crlf >= cr)
-        {
-            lineEnding = "\r\n";
-        }
-        else if (cr > lf && cr > crlf)
-        {
-            lineEnding = "\r";
-        }
-        else
-        {
-            lineEnding = "\n";
-        }
-
-        return lines;
-    }
-
-    private static int[] BuildByteOffsets(string text, Encoding encoding)
-    {
-        bool utf8 = encoding is UTF8Encoding;
-        bool utf16 = encoding is UnicodeEncoding;
-        bool singleByte = encoding.IsSingleByte;
-        var map = new int[text.Length + 1];
-        int position = 0;
-        int i = 0;
-        while (i < text.Length)
-        {
-            map[i] = position;
-            int chars = char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]) ? 2 : 1;
-            int bytes;
-            if (utf16)
-            {
-                bytes = 2 * chars;
-            }
-            else if (singleByte)
-            {
-                bytes = 1;
-            }
-            else if (utf8)
-            {
-                char c = text[i];
-                bytes = chars == 2 ? 4 : c < 0x80 ? 1 : c < 0x800 ? 2 : 3;
-            }
-            else
-            {
-                bytes = encoding.GetByteCount(text.AsSpan(i, chars));
-            }
-
-            if (chars == 2)
-            {
-                map[i + 1] = position;
-            }
-
-            position += bytes;
-            i += chars;
-        }
-
-        map[text.Length] = position;
-        return map;
-    }
-
-    private readonly record struct Line(int Start, int End, int TermEnd);
 }
