@@ -11,7 +11,7 @@ using MediaBrowser.Model.Serialization;
 namespace Jellyfin.Plugin.SubtitleQuickEdit;
 
 /// <summary>
-/// The Subtitle Quick Edit plugin: edit the text of external .srt subtitles from the web player.
+/// The Subtitle Editor plugin: edit the text of external .srt, .vtt and .ass subtitles from the web player.
 /// </summary>
 public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
@@ -32,7 +32,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     }
 
     /// <inheritdoc />
-    public override string Name => "Subtitle Quick Edit";
+    public override string Name => "Subtitle Editor";
 
     /// <inheritdoc />
     public override Guid Id => Guid.Parse("b3b6f2a4-6f0e-4d5c-9a0c-5e2f6c1d7a31");

@@ -30,4 +30,17 @@ public class CueDto
     /// </summary>
     [JsonPropertyName("text")]
     public string Text { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the ASS/SSA style name of the line, or null for other formats.
+    /// </summary>
+    [JsonPropertyName("style")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Style { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the line cannot be edited (an ASS/SSA drawing).
+    /// </summary>
+    [JsonPropertyName("readOnly")]
+    public bool ReadOnly { get; set; }
 }

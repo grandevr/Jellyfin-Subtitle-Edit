@@ -1,4 +1,4 @@
-/* Subtitle Quick Edit client styles. Every class starts with "sqe-" so nothing collides with jellyfin-web. */
+/* Subtitle Editor client styles. Every class starts with "sqe-" so nothing collides with jellyfin-web. */
 
 :root {
     --sqe-bg: rgba(24, 24, 24, 0.97);
@@ -136,6 +136,41 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
     color: var(--sqe-fg);
 }
 
+.sqe-cue-style {
+    font-style: italic;
+}
+
+/* "Show style tags" (ASS and WebVTT files). */
+.sqe-tags {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    margin-bottom: 4px;
+    color: var(--sqe-fg);
+    cursor: pointer;
+}
+
+.sqe-tags[hidden] {
+    display: none;
+}
+
+.sqe-tags-toggle {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    accent-color: var(--sqe-accent);
+}
+
+.sqe-tags-toggle:focus-visible {
+    outline: 2px solid var(--sqe-accent);
+    outline-offset: 2px;
+}
+
+.sqe-cue-text[readonly] {
+    color: var(--sqe-muted);
+}
+
 .sqe-cue-text {
     box-sizing: border-box;
     width: 100%;
@@ -224,6 +259,10 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
 
 .sqe-badge-failed {
     background: rgba(255, 138, 128, 0.3);
+}
+
+.sqe-badge-styled {
+    text-transform: none;
 }
 
 .sqe-changes {

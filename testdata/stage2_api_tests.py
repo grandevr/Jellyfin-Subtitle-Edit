@@ -165,7 +165,7 @@ def track(item, lang, fmt=None):
 
 st, plugins = call("GET", "/Plugins")
 mine = [p for p in plugins if p["Id"].replace("-", "").lower() == PLUGIN_ID.replace("-", "")]
-check("the plugin is installed and active", mine and mine[0]["Name"] == "Subtitle Quick Edit" and mine[0]["Status"] == "Active", mine)
+check("the plugin is installed and active", mine and mine[0]["Name"] == "Subtitle Editor" and mine[0]["Status"] == "Active", mine)
 st, cfg = call("GET", "/Plugins/%s/Configuration" % PLUGIN_ID)
 check(
     "default settings: submissions off, 50 pending, original-only backups",
@@ -174,7 +174,7 @@ check(
     cfg,
 )
 st, page = call("GET", "/web/ConfigurationPage?name=SubtitleQuickEdit", tok=None)
-check("the settings page is served", st == 200 and "Subtitle Quick Edit" in str(page), st)
+check("the settings page is served", st == 200 and "Subtitle Editor" in str(page), st)
 
 # ---- listing ------------------------------------------------------------------------------------------------
 
@@ -193,8 +193,8 @@ ass = by_format.get((True, "ass", "jpn"))
 vtt = by_format.get((True, "vtt", "deu"))
 bad = by_format.get((True, "srt", "fra"))
 good3 = by_format.get((True, "srt", "eng"))
-check("an external .ass is not editable ('Only SubRip')", ass and not ass["editable"] and "SubRip" in ass.get("reason"), ass)
-check("an external .vtt is not editable ('Only SubRip')", vtt and not vtt["editable"] and "SubRip" in vtt.get("reason"), vtt)
+check("an external .ass is editable (1.1)", ass and ass["editable"] and not ass.get("reason"), ass)
+check("an external .vtt is editable (1.1)", vtt and vtt["editable"] and not vtt.get("reason"), vtt)
 check("an unparseable .srt is not editable, with the parser's reason", bad and not bad["editable"] and bad.get("reason"), bad)
 check("a good .srt next to them is editable", good3 and good3["editable"], good3)
 
@@ -212,11 +212,19 @@ check("cues: 12 cues with ms times and 1-based indexes", len(cues["cues"]) == 12
 check("cues: Windows-1250 Polish text is decoded correctly, line breaks as \\n",
       [c["text"] for c in cues["cues"][:3]] == polish_texts, [c["text"] for c in cues["cues"][:3]])
 check("cues: the detected encoding is reported", cues["encoding"].startswith("windows-1250") or "1250" in cues["encoding"], cues["encoding"])
+check("cues of an .srt: format srt, times to the millisecond, no style, nothing read-only",
+      cues.get("format") == "srt" and cues.get("timePrecisionMs") == 1
+      and all("style" not in c and c.get("readOnly") is False for c in cues["cues"]), {k: cues.get(k) for k in ("format", "timePrecisionMs")})
 
 st, r = call("GET", cues_url(EP[3], emb[0]["streamIndex"]))
 check("cues of an embedded track: 400 NotEditable", st == 400 and r["code"] == "NotEditable", (st, r))
 st, r = call("GET", cues_url(EP[3], ass["streamIndex"]))
-check("cues of an .ass track: 400 NotEditable", st == 400 and r["code"] == "NotEditable", (st, r))
+check("cues of an .ass track: 200, format ass, 10 ms times, the style name",
+      st == 200 and r["format"] == "ass" and r["timePrecisionMs"] == 10 and r["cues"][0]["style"] == "Default"
+      and r["cues"][0]["text"] == "Styled line", (st, r))
+st, r = call("GET", cues_url(EP[3], vtt["streamIndex"]))
+check("cues of a .vtt track: 200, format vtt", st == 200 and r["format"] == "vtt" and r["cues"][0]["text"] == "VTT line"
+      and r["cues"][0]["start"] == 1000, (st, r))
 st, r = call("GET", cues_url(EP[3], bad["streamIndex"]))
 check("cues of an unparseable .srt: 422 NotEditable", st == 422 and r["code"] == "NotEditable", (st, r))
 st, r = call("GET", cues_url(EP[3], 99))
@@ -312,7 +320,6 @@ refusal("no edits -> 400 InvalidEdit", {"baseHash": H, "edits": []}, 400, "Inval
 refusal("no baseHash -> 400 InvalidRequest", {"edits": [good_edit]}, 400, "InvalidRequest")
 refusal("the same cue edited twice -> 400 InvalidEdit", {"baseHash": H, "edits": [good_edit, good_edit]}, 400, "InvalidEdit")
 refusal("an embedded track -> 400 NotEditable", {"baseHash": H, "edits": [good_edit]}, 400, "NotEditable", item=EP[3], idx=emb[0]["streamIndex"])
-refusal("an .ass track -> 400 NotEditable", {"baseHash": H, "edits": [good_edit]}, 400, "NotEditable", item=EP[3], idx=ass["streamIndex"])
 refusal("an unparseable .srt -> 422 NotEditable", {"baseHash": H, "edits": [good_edit]}, 422, "NotEditable", item=EP[3], idx=bad["streamIndex"])
 refusal("a stream index that does not exist -> 404 StreamNotFound", {"baseHash": H, "edits": [good_edit]}, 404, "StreamNotFound", idx=99)
 refusal("an unknown item -> 404 ItemNotFound", {"baseHash": H, "edits": [good_edit]}, 404, "ItemNotFound", item="00000000000000000000000000000001")

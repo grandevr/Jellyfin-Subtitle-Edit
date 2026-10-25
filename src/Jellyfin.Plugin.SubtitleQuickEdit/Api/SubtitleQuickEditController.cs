@@ -25,7 +25,7 @@ using SubtitleQuickEdit.Core.Subtitles;
 namespace Jellyfin.Plugin.SubtitleQuickEdit.Api;
 
 /// <summary>
-/// The Subtitle Quick Edit server API. The client sends an item id and a subtitle stream index, never a path:
+/// The Subtitle Editor server API. The client sends an item id and a subtitle stream index, never a path:
 /// the file is found from Jellyfin's own library data. The submission routes are in the other part of this class.
 /// </summary>
 [ApiController]
@@ -138,7 +138,7 @@ public partial class SubtitleQuickEditController : ControllerBase
     /// <param name="itemId">The id of the item the subtitle belongs to.</param>
     /// <param name="streamIndex">The index of the subtitle stream whose cues are returned.</param>
     /// <response code="200">The cues.</response>
-    /// <response code="400">The stream is not an editable external .srt.</response>
+    /// <response code="400">The stream is not an editable external .srt, .vtt, .ass or .ssa file.</response>
     /// <response code="403">The caller may not use the editor.</response>
     /// <response code="404">No such item or stream.</response>
     /// <response code="422">The file cannot be parsed reliably.</response>
@@ -174,7 +174,17 @@ public partial class SubtitleQuickEditController : ControllerBase
         {
             Hash = doc.Hash,
             Encoding = doc.Encoding.Name,
-            Cues = doc.Cues.Select(c => new CueDto { Index = c.Position, Start = c.StartMs, End = c.EndMs, Text = c.Text }).ToList(),
+            Format = SubtitleFormats.Name(doc.Format),
+            TimePrecisionMs = doc.Format == SubtitleFormat.Ass ? 10 : 1,
+            Cues = doc.Cues.Select(c => new CueDto
+            {
+                Index = c.Position,
+                Start = c.StartMs,
+                End = c.EndMs,
+                Text = c.Text,
+                Style = c.Style,
+                ReadOnly = c.ReadOnly,
+            }).ToList(),
         };
     }
 
@@ -260,7 +270,7 @@ public partial class SubtitleQuickEditController : ControllerBase
                 result.Method);
             foreach (string note in result.Notes)
             {
-                logger.LogWarning("Subtitle Quick Edit: {Note}", note);
+                logger.LogWarning("Subtitle Editor: {Note}", note);
             }
 
             return new EditsResponse
@@ -357,7 +367,7 @@ public partial class SubtitleQuickEditController : ControllerBase
 
             foreach (string note in result.Notes)
             {
-                logger.LogWarning("Subtitle Quick Edit: {Note}", note);
+                logger.LogWarning("Subtitle Editor: {Note}", note);
             }
 
             return new RestoreResponse { Hash = result.Hash, Restored = result.Restored, WriteMethod = result.Method?.ToString() };
@@ -510,7 +520,7 @@ public partial class SubtitleQuickEditController : ControllerBase
     private (BaseItem? Item, EditorRights Rights, ObjectResult? Denied) Authorize(Guid itemId, Need need)
     {
         EditorRights rights = Rights();
-        string? refusal = !rights.CanRead ? "You are not allowed to use Subtitle Quick Edit."
+        string? refusal = !rights.CanRead ? "You are not allowed to use Subtitle Editor."
             : need == Need.Edit && !rights.CanEdit ? "Your changes need an administrator's approval: submit them for review instead."
             : need == Need.Submit && !rights.CanSubmit ? "You can save your changes directly; there is nothing to submit."
             : null;

@@ -11,7 +11,7 @@ public static class SubtitleFormats
     /// <summary>
     /// The message for a file whose format the editor does not handle.
     /// </summary>
-    public const string UnsupportedMessage = "Only SubRip (.srt) subtitles can be edited.";
+    public const string UnsupportedMessage = "Only SubRip (.srt), WebVTT (.vtt) and ASS/SSA (.ass, .ssa) subtitles can be edited.";
 
     /// <summary>
     /// Gets a file's format from its extension.
@@ -45,7 +45,7 @@ public static class SubtitleFormats
     /// </summary>
     /// <param name="format">The format.</param>
     /// <returns>True when the editor can parse and write it.</returns>
-    public static bool IsEditable(SubtitleFormat format) => format == SubtitleFormat.Srt;
+    public static bool IsEditable(SubtitleFormat format) => format is SubtitleFormat.Srt or SubtitleFormat.WebVtt or SubtitleFormat.Ass;
 
     /// <summary>
     /// Gets a value indicating whether a file can be edited by this build, judged by its extension.

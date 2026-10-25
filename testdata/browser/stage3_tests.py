@@ -219,12 +219,12 @@ def admin_desktop(browser, pages):
     check("Esc did not leave the player",
           page.evaluate("() => Boolean(document.querySelector('video.htmlvideoplayer'))"))
 
-    # Tracks the button must stay hidden for, then one it must show for.
+    # An embedded track (button hidden), then the .vtt and the .srt (button shown).
     movie3 = MOVIES["TestWebm 03"]
     play(page, movie3)
     t3 = tracks(movie3)
     embedded = [t for t in t3 if not t["external"]]
-    vtt = [t for t in t3 if t["external"] and t["format"] != "srt"]
+    vtt = [t for t in t3 if t["external"] and t["format"] == "vtt"]
     srt = [t for t in t3 if t["external"] and t["format"] == "srt" and t["editable"]]
     if embedded:
         choose_subtitle(page, embedded[0]["streamIndex"])
@@ -233,10 +233,13 @@ def admin_desktop(browser, pages):
         check("movie 3 has an embedded subtitle track", False, "none found")
     if vtt:
         choose_subtitle(page, vtt[0]["streamIndex"])
-        check("button hidden for a non-.srt subtitle", wait_button(page, False, 4) and not wait_button(page, True, 3))
+        check("button shows for an external .vtt (1.1)", wait_button(page, True, 6))
     else:
         check("movie 3 has an external .vtt track", False, "none found")
     if srt:
+        if embedded:  # hide the button again, so the .srt check sees it appear
+            choose_subtitle(page, embedded[0]["streamIndex"])
+            wait_button(page, False, 4)
         choose_subtitle(page, srt[0]["streamIndex"])
         check("button appears after switching to the .srt", wait_button(page, True, 6))
     choose_subtitle(page, -1)

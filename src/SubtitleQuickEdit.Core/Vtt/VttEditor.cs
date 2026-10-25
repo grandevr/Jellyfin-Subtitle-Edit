@@ -166,7 +166,7 @@ internal static class VttEditor
         return NormalizeAndValidateText(add.Text, null);
     }
 
-    private static void Verify(VttDocument doc, byte[] content, List<(long Start, long End, string Text)> expected)
+    internal static void Verify(VttDocument doc, byte[] content, List<(long Start, long End, string Text)> expected)
     {
         VttParseResult result = VttParser.Parse(content);
         if (result.Document is null)

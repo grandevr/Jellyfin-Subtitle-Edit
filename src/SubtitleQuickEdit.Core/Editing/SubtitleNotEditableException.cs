@@ -3,7 +3,7 @@ using System;
 namespace SubtitleQuickEdit.Core.Editing;
 
 /// <summary>
-/// Thrown when a subtitle file cannot be edited at all (not an .srt, missing, unreadable, not parseable).
+/// Thrown when a subtitle file cannot be edited at all (not a supported format, missing, unreadable, not parseable).
 /// </summary>
 public sealed class SubtitleNotEditableException : Exception
 {

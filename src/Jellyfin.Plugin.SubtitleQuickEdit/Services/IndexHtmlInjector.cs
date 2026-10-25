@@ -36,7 +36,7 @@ public static class IndexHtmlInjector
         // Relative to /web/index.html, so it also works when Jellyfin is served under a base path.
         string version = Uri.EscapeDataString(typeof(IndexHtmlInjector).Assembly.GetName().Version?.ToString() ?? "0");
         string tags =
-            "<!-- Subtitle Quick Edit -->\n" +
+            "<!-- Subtitle Editor -->\n" +
             "<link rel=\"stylesheet\" href=\"../SubtitleQuickEdit/Client/quickedit.css?v=" + version + "\" " + Marker + ">\n" +
             "<script src=\"../SubtitleQuickEdit/Client/quickedit.js?v=" + version + "\" " + Marker + "></script>\n";
         return html.Insert(end, tags);

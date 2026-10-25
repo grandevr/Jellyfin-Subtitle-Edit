@@ -116,7 +116,7 @@ public sealed class FileTransformationRegistrar : IHostedService, IDisposable
             if (fileTransformation is null)
             {
                 logger.LogError(
-                    "Subtitle Quick Edit: the File Transformation plugin (3.0.2.0 or later) is not installed or not enabled, so the edit button cannot be added to the web page. The server API still works. Install or enable File Transformation and restart Jellyfin.");
+                    "Subtitle Editor: the File Transformation plugin (3.0.2.0 or later) is not installed or not enabled, so the edit button cannot be added to the web page. The server API still works. Install or enable File Transformation and restart Jellyfin.");
                 return;
             }
 
@@ -124,7 +124,7 @@ public sealed class FileTransformationRegistrar : IHostedService, IDisposable
             {
                 Register(fileTransformation);
                 logger.LogInformation(
-                    "Subtitle Quick Edit: registered the client script with File Transformation {Version} (id {Id}, file {Pattern}, attempt {Attempt}).",
+                    "Subtitle Editor: registered the client script with File Transformation {Version} (id {Id}, file {Pattern}, attempt {Attempt}).",
                     fileTransformation.GetName().Version,
                     TransformationId,
                     FileNamePattern,
@@ -134,7 +134,7 @@ public sealed class FileTransformationRegistrar : IHostedService, IDisposable
             catch (MissingMemberException ex)
             {
                 logger.LogError(
-                    "Subtitle Quick Edit: File Transformation {Version} does not offer {Type}.{Method} ({Message}). 3.0.2.0 or later is needed, so the edit button cannot be added to the web page. The server API still works.",
+                    "Subtitle Editor: File Transformation {Version} does not offer {Type}.{Method} ({Message}). 3.0.2.0 or later is needed, so the edit button cannot be added to the web page. The server API still works.",
                     fileTransformation.GetName().Version,
                     InterfaceType,
                     RegisterMethod,
@@ -149,7 +149,7 @@ public sealed class FileTransformationRegistrar : IHostedService, IDisposable
         }
 
         logger.LogError(
-            "Subtitle Quick Edit: could not register with File Transformation after {Attempts} attempts (last error: {Error}). The edit button will not appear on the web page. The server API still works. Restart Jellyfin to try again.",
+            "Subtitle Editor: could not register with File Transformation after {Attempts} attempts (last error: {Error}). The edit button will not appear on the web page. The server API still works. Restart Jellyfin to try again.",
             RetryDelays.Length + 1,
             lastFailure);
     }

@@ -5,7 +5,7 @@ Mutants are built with analyzers off (the strict analyzers reject deliberately b
 copy is built the same way first and must pass.
 
 Each mutant is a scratch copy of the project (never the real source), synced to
-$SQE_TEST_ROOT/src/sqe-mut on the test host and tested in the SDK container. A mutant is "killed" when
+$SQE_TEST_ROOT/src/sqe-mut on the test host (devtools/sync.sh creates it) and tested in the SDK container. A mutant is "killed" when
 `dotnet test` fails. Usage: python3 -I devtools/mutation_check.py
 """
 import os
@@ -74,10 +74,14 @@ MUTANTS = [
     ("any file extension is taken for .srt",
      "src/SubtitleQuickEdit.Core/Subtitles/SubtitleFormats.cs",
      "        return null;\n", "        return SubtitleFormat.Srt;\n"),
-    ("formats without a parser count as editable",
+    ("ASS/SSA files are not editable",
      "src/SubtitleQuickEdit.Core/Subtitles/SubtitleFormats.cs",
-     "public static bool IsEditable(SubtitleFormat format) => format == SubtitleFormat.Srt;",
-     "public static bool IsEditable(SubtitleFormat format) => true;"),
+     "format is SubtitleFormat.Srt or SubtitleFormat.WebVtt or SubtitleFormat.Ass;",
+     "format is SubtitleFormat.Srt or SubtitleFormat.WebVtt;"),
+    ("a second backup in the same millisecond sorts as older",
+     "src/SubtitleQuickEdit.Core/Storage/BackupStore.cs",
+     'string suffix = attempt == 0 ? string.Empty : "~" + attempt.ToString("D2", CultureInfo.InvariantCulture);',
+     'string suffix = attempt == 0 ? string.Empty : "-" + attempt.ToString(CultureInfo.InvariantCulture);'),
     ("backups always get the .srt extension",
      "src/SubtitleQuickEdit.Core/Storage/BackupStore.cs",
      "return string.IsNullOrEmpty(extension) ? \".srt\" : extension;", "return \".srt\";"),

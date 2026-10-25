@@ -207,6 +207,24 @@ public class VttTests
         Assert.Contains(reason, result.FailureReason, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(0L, 0L, "changed")]
+    [InlineData(1L, 0L, null)]
+    [InlineData(0L, 1L, null)]
+    public void The_self_check_refuses_a_result_whose_cue_reads_back_differently(long startShift, long endShift, string? text)
+    {
+        byte[] data = Fixtures.Utf8("WEBVTT\n\n00:01.000 --> 00:02.000\nOne\n\n00:03.000 --> 00:04.000\nTwo\n");
+        VttDocument doc = Parse(data);
+        var expected = doc.Cues.Select(c => (c.StartMs, c.EndMs, c.Text)).ToList();
+        VttEditor.Verify(doc, data, expected);
+        expected[1] = (expected[1].StartMs + startShift, expected[1].EndMs + endShift, text ?? expected[1].Text);
+
+        SubtitleEditException ex = Assert.Throws<SubtitleEditException>(() => VttEditor.Verify(doc, data, expected));
+
+        Assert.Equal(SubtitleEditError.VerificationFailed, ex.Error);
+        Assert.Equal(2, ex.CuePosition);
+    }
+
     private static SubtitleEditException Refusal(VttDocument doc, SubtitleEdit edit) =>
         Assert.Throws<SubtitleEditException>(() => doc.Apply(new[] { edit }));
 

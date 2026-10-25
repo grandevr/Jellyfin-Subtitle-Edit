@@ -1,5 +1,5 @@
 /*
- * Subtitle Quick Edit client logic: pure functions and a staging model, no DOM and no network.
+ * Subtitle Editor client logic: pure functions and a staging model, no DOM and no network.
  * Works as a CommonJS module (Node unit tests) and as a plain script (window.SqeLogic).
  *
  * Conventions: times are integer milliseconds. A cue is { index, start, end, text } where index is the cue's 1-based
@@ -244,8 +244,13 @@
         return String(value).replace(/\r\n?/g, '\n');
     }
 
-    /** Checks cue text. Returns { ok: true, text } (text with LF breaks) or { ok: false, error: { code, message } }. */
-    function validateCueText(value) {
+    /**
+     * Checks cue text for a format ('srt' when not given; 'vtt'; 'ass'). Returns { ok: true, text } (text with LF breaks)
+     * or { ok: false, error: { code, message } }. The rules are the server's: every format needs at least one character
+     * and no control characters; .srt and .vtt text may not hold a blank line, .srt text no line that looks like a time
+     * line and .vtt text no "-->". ASS text may hold blank lines (\N\N), since its line breaks are not real ones.
+     */
+    function validateCueText(value, format) {
         if (typeof value !== 'string') {
             return { ok: false, error: { code: 'TextNotText', message: 'The text must be a string.' } };
         }
@@ -258,11 +263,15 @@
         const lines = text.split('\n');
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            if (line.trim().length === 0) {
+            if (format !== 'ass' && line.trim().length === 0) {
                 return { ok: false, error: { code: 'TextBlankLine', message: 'The text must not contain empty lines: a blank line would end the cue.' } };
             }
 
-            if (TIME_LINE_PATTERN.test(line)) {
+            if (format === 'vtt' && line.indexOf('-->') >= 0) {
+                return { ok: false, error: { code: 'TextArrow', message: 'A line of text must not contain "-->": in a WebVTT file it would start a new cue.' } };
+            }
+
+            if (format !== 'vtt' && format !== 'ass' && TIME_LINE_PATTERN.test(line)) {
                 return { ok: false, error: { code: 'TextLooksLikeTime', message: 'A line of text must not look like a cue time line (hh:mm:ss,mmm --> hh:mm:ss,mmm).' } };
             }
 
@@ -277,9 +286,53 @@
         return { ok: true, text: text };
     }
 
+    // ---- style tags (ASS override blocks, WebVTT tags) ------------------------------------------------------------
+
+    const ASS_LEADING_TAGS = /^(?:\{[^}]*\})+/;
+    const VTT_LEADING_TAGS = /^(?:<[a-z][^>\n]*>)+/i;
+    const VTT_TRAILING_TAGS = /(?:<\/[a-z]+>)+$/i;
+
+    /**
+     * Splits cue text into the style tags the editor hides when "Show style tags" is off and the text it shows: for ASS
+     * the override blocks at the very start ({\an8}); for WebVTT the tags opening the line (<v Anna>, <i>) and those
+     * closing it. Tags inside the line stay in body. prefix + body + suffix is always the text it was given.
+     */
+    function splitStyleTags(text, format) {
+        const value = String(text);
+        let prefix = '';
+        let suffix = '';
+        if (format === 'ass') {
+            const m = ASS_LEADING_TAGS.exec(value);
+            prefix = m ? m[0] : '';
+        } else if (format === 'vtt') {
+            const m = VTT_LEADING_TAGS.exec(value);
+            prefix = m ? m[0] : '';
+            const rest = value.slice(prefix.length);
+            const t = prefix ? VTT_TRAILING_TAGS.exec(rest) : null;
+            suffix = t ? t[0] : '';
+        }
+
+        return { prefix: prefix, body: value.slice(prefix.length, value.length - suffix.length), suffix: suffix };
+    }
+
+    /** Whether a format has style tags the editor can hide (and so shows the "Show style tags" toggle). */
+    function hasStyleTags(format) {
+        return format === 'ass' || format === 'vtt';
+    }
+
+    /**
+     * Cue text as the player shows it from Jellyfin's own conversion: ASS override blocks removed and \h as a space.
+     * Used to compare with, or write into, the player's text track. Other formats are unchanged.
+     */
+    function screenText(text, format) {
+        const value = String(text);
+        return format === 'ass' ? value.replace(/\{[^}]*\}/g, '').replace(/\\h/g, ' ') : value;
+    }
+
     /**
      * Checks an added line the way the server will: start at least 0, end after start, at least 100 ms long, end within
-     * 99:59:59,999 and within the runtime when it is known, and valid text. Returns { ok, errors: [{ field, message }] }.
+     * 99:59:59,999 and within the runtime when it is known, and valid text for options.format. Returns { ok, errors:
+     * [{ field, message }] }.
      */
     function validateNewLine(line, options) {
         const errors = [];
@@ -310,7 +363,7 @@
             }
         }
 
-        const text = validateCueText(line ? line.text : null);
+        const text = validateCueText(line ? line.text : null, options && options.format);
         if (!text.ok) {
             errors.push({ field: 'text', message: text.error.message });
         }
@@ -387,6 +440,7 @@
             this.cues = [];
             this.baseHash = null;
             this.runtimeMs = typeof o.runtimeMs === 'number' ? o.runtimeMs : null;
+            this.format = typeof o.format === 'string' ? o.format : 'srt';
             this.editSeq = 0;
             this.addSeq = 0;
             this.newClientId = typeof o.newClientId === 'function' ? o.newClientId : null;
@@ -437,7 +491,7 @@
          * file's text); setting the text back to the original removes the row. Returns { ok, row } or { ok: false, error }.
          */
         stageEdit(cue, newText) {
-            const checked = validateCueText(newText);
+            const checked = validateCueText(newText, this.format);
             if (!checked.ok) {
                 return { ok: false, error: checked.error };
             }
@@ -486,7 +540,7 @@
 
         /** Stages a new line { startMs, endMs, text }. Returns { ok, row } or { ok: false, errors }. */
         stageAdd(line) {
-            const checked = validateNewLine(line, { runtimeMs: this.runtimeMs });
+            const checked = validateNewLine(line, { runtimeMs: this.runtimeMs, format: this.format });
             if (!checked.ok) {
                 return { ok: false, errors: checked.errors };
             }
@@ -514,7 +568,7 @@
                 return { ok: false, errors: [{ field: 'row', message: 'That new line is not staged any more.' }] };
             }
 
-            const checked = validateNewLine(line, { runtimeMs: this.runtimeMs });
+            const checked = validateNewLine(line, { runtimeMs: this.runtimeMs, format: this.format });
             if (!checked.ok) {
                 return { ok: false, errors: checked.errors };
             }
@@ -787,7 +841,7 @@
 
                     self.rows.push(row);
                 } else if (row.type === 'add' && typeof row.clientId === 'string') {
-                    const checked = validateNewLine(row, { runtimeMs: self.runtimeMs });
+                    const checked = validateNewLine(row, { runtimeMs: self.runtimeMs, format: self.format });
                     if (checked.ok) {
                         row.text = checked.text;
                         row.status = 'staged';
@@ -1084,6 +1138,9 @@
         normalizeText: normalizeText,
         validateCueText: validateCueText,
         validateNewLine: validateNewLine,
+        splitStyleTags: splitStyleTags,
+        hasStyleTags: hasStyleTags,
+        screenText: screenText,
         shiftPosition: shiftPosition,
         locateCue: locateCue,
         StagingModel: StagingModel,

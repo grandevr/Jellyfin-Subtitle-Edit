@@ -32,7 +32,11 @@ function showCustom() {
   }
 }
 const FILE_KEY = 'fake-file';
-const initial = { hash: 'h0', n: 0, cues: [{ index: 1, start: 0, end: 2000, text: 'Hello there' }, { index: 2, start: 3000, end: 4000, text: 'Two' }] };
+const FORMAT = (location.search.match(/format=(\\w+)/) || [])[1] || 'srt'; // srt or ass
+const initial = FORMAT === 'ass'
+  ? { hash: 'h0', n: 0, cues: [{ index: 1, start: 0, end: 2000, text: '{\\\\an8}Hello there', style: 'Sign', readOnly: false },
+    { index: 2, start: 3000, end: 4000, text: '{\\\\p1}m 0 0 l 1 1{\\\\p0}', style: 'Default', readOnly: true }] }
+  : { hash: 'h0', n: 0, cues: [{ index: 1, start: 0, end: 2000, text: 'Hello there' }, { index: 2, start: 3000, end: 4000, text: 'Two' }] };
 function file() { return JSON.parse(sessionStorage.getItem(FILE_KEY) || JSON.stringify(initial)); }
 function store(f) { sessionStorage.setItem(FILE_KEY, JSON.stringify(f)); keep(f); }
 // Every version the "file" has had, by hash: the plugin's backups, for Restore.
@@ -53,8 +57,8 @@ setTimeout(() => {
   window.addEventListener('keydown', (e) => window.jfKeys.push('w:' + e.key), true);
   const R = {
     'Sessions': () => [{ Id: 's1', NowPlayingItem: { Id: 'abc', RunTimeTicks: 600000000 }, PlayState: { MediaSourceId: 'abc', SubtitleStreamIndex: 0 } }],
-    'SubtitleQuickEdit/Items/abc/Subtitles': () => [{ streamIndex: 0, external: true, format: 'srt', editable: true }],
-    'SubtitleQuickEdit/Items/abc/Subtitles/0/Cues': () => { const f = file(); return { hash: f.hash, encoding: 'utf-8', cues: f.cues }; },
+    'SubtitleQuickEdit/Items/abc/Subtitles': () => [{ streamIndex: 0, external: true, format: FORMAT, editable: true }],
+    'SubtitleQuickEdit/Items/abc/Subtitles/0/Cues': () => { const f = file(); return { hash: f.hash, encoding: 'utf-8', format: FORMAT, timePrecisionMs: FORMAT === 'ass' ? 10 : 1, cues: f.cues }; },
     // Jellyfin leaves null fields out: a non-admin's answer has no pendingReviews.
     'SubtitleQuickEdit/Me': () => ROLE === 'admin' ? { isAdmin: true, canEdit: true, canSubmit: false, submissionsOn: true, pendingReviews: 2, maxNoteLength: 500 }
       : { isAdmin: false, canEdit: false, canSubmit: ROLE === 'submitter', submissionsOn: true, maxNoteLength: 500 },
@@ -160,6 +164,7 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
     (await p.$eval('.sqe-pending', (a) => !a.hidden && a.textContent)) === '2 submissions are waiting for your review';
   checks['admin: no Submit button or note box'] = !(await p.$('.sqe-submit')) && !(await p.$('.sqe-note'));
   checks['the text box has focus'] = (await p.evaluate(() => document.activeElement.className)) === 'sqe-cue-text';
+  checks['srt: no "Show style tags" toggle'] = await p.$eval('.sqe-tags', (e) => e.hidden && e.offsetParent === null);
   await p.keyboard.type(' f k');
   await p.keyboard.press('ArrowLeft');
   checks['no key reached the page\'s own listeners'] = (await p.evaluate(() => window.jfKeys.length)) === 0;
@@ -446,6 +451,45 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   checks['no rights: no button, and the client knows it'] = !(await n.$('.sqe-edit-button')) &&
     (await n.evaluate(() => window.SubtitleQuickEdit.debugState().mode)) === null;
   await n.close();
+
+  // 5d: an ASS file: the "Show style tags" toggle, the style name, a read-only drawing, the 10 ms hint.
+  const a = await b.newPage();
+  await a.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  a.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+  a.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
+  a.on('dialog', (d) => d.accept());
+  await a.goto(ORIGIN + '/web/index.html?format=ass');
+  await a.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  await a.click('.sqe-edit-button');
+  await a.waitForSelector('.sqe-cue-text', { timeout: 5000 });
+  checks['ass: the "Show style tags" toggle is shown and off'] =
+    await a.$eval('.sqe-tags', (e) => !e.hidden && e.offsetParent !== null && !e.querySelector('input').checked);
+  checks['ass: tags hidden, the box shows the text without its leading override block'] = (await a.inputValue('.sqe-cue-text')) === 'Hello there';
+  checks['ass: the line shows its style name and a styled badge'] =
+    (await a.$eval('.sqe-cue-style', (e) => e.textContent)) === 'Sign' && Boolean(await a.$('.sqe-badge-styled'));
+  await a.fill('.sqe-cue-text', 'Hello world');
+  await a.keyboard.press('Control+Enter');
+  checks['ass: the player overlay shows the staged text without tags'] = await a.evaluate(() => Array.from(Array.from(document.querySelector('video').textTracks)
+    .find((t) => t.label === 'manualTrack').cues).some((c) => c.text.replace(/\u200e/g, '') === 'Hello world'));
+  await a.keyboard.press('Control+s');
+  await a.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Saved') === 0, null, { timeout: 5000 });
+  const assSent = await a.evaluate(() => window.fakeEditsSent);
+  checks['ass: Save puts the hidden override block back in front of the new text'] = assSent.length === 1 &&
+    assSent[0].edits[0].oldText === '{\\an8}Hello there' && assSent[0].edits[0].newText === '{\\an8}Hello world';
+  await a.click('.sqe-tags-toggle');
+  checks['ass: tags shown, the box shows the full text'] = (await a.inputValue('.sqe-cue-text')) === '{\\an8}Hello world';
+  await a.click('.sqe-next');
+  checks['ass: a drawing is read-only, with a hint'] = await a.$eval('.sqe-cue', (e) => e.querySelector('textarea').readOnly &&
+    e.textContent.indexOf('drawing') >= 0);
+  await a.click('.sqe-add');
+  await a.waitForSelector('.sqe-new-line', { timeout: 3000 });
+  checks['ass: Add line says the file keeps times to 10 ms'] = (await a.$eval('.sqe-new-line', (e) => e.textContent)).indexOf('keeps times to 10 ms') >= 0;
+  await a.reload();
+  await a.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  await a.click('.sqe-edit-button');
+  await a.waitForSelector('.sqe-cue-text', { timeout: 5000 });
+  checks['ass: the toggle is remembered after a page reload'] = await a.$eval('.sqe-tags-toggle', (e) => e.checked);
+  await a.close();
 
   checks['no errors in the console'] = logs.every((l) => !/^(error|pageerror)/.test(l));
 

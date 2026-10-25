@@ -28,13 +28,17 @@ public class SubtitleFormatsTests
     }
 
     [Fact]
-    public void Only_srt_is_editable_until_the_other_parsers_land()
+    public void Srt_vtt_and_ass_are_editable_and_nothing_else()
     {
         Assert.True(SubtitleFormats.IsEditable(SubtitleFormat.Srt));
-        Assert.False(SubtitleFormats.IsEditable(SubtitleFormat.WebVtt));
-        Assert.False(SubtitleFormats.IsEditable(SubtitleFormat.Ass));
+        Assert.True(SubtitleFormats.IsEditable(SubtitleFormat.WebVtt));
+        Assert.True(SubtitleFormats.IsEditable(SubtitleFormat.Ass));
         Assert.True(SubtitleFormats.IsEditable("/m/a.srt"));
-        Assert.False(SubtitleFormats.IsEditable("/m/a.vtt"));
+        Assert.True(SubtitleFormats.IsEditable("/m/a.vtt"));
+        Assert.True(SubtitleFormats.IsEditable("/m/a.SSA"));
+        Assert.False(SubtitleFormats.IsEditable("/m/a.sub"));
+        Assert.False(SubtitleFormats.IsEditable("/m/a.srt.bak"));
+        Assert.False(SubtitleFormats.IsEditable("/m/a.sup"));
     }
 
     [Theory]
