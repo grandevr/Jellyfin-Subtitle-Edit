@@ -52,6 +52,11 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     /// </summary>
     public string BackupFolder => Path.Combine(DataFolder, "backups");
 
+    /// <summary>
+    /// Gets the folder for user submissions waiting for, or decided by, an admin.
+    /// </summary>
+    public string SubmissionsFolder => Path.Combine(DataFolder, "submissions");
+
     /// <inheritdoc />
     public IEnumerable<PluginPageInfo> GetPages()
     {

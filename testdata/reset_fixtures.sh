@@ -9,7 +9,7 @@ python3 -I "$here/make_testdata.py" "$tmp"
 tar -c --owner=1000 --group=1000 -C "$tmp" . | sqe_host tar -x -C "$SQE_TEST_ROOT/media"
 rm -rf "$tmp"
 sqe_host chmod 755 "$SQE_TEST_ROOT/media/TestShow/Season 01"
-sqe_host rm -rf "$SQE_TEST_ROOT/config/data/SubtitleQuickEdit/backups"
+sqe_host rm -rf "$SQE_TEST_ROOT/config/data/SubtitleQuickEdit/backups" "$SQE_TEST_ROOT/config/data/SubtitleQuickEdit/submissions"
 sqe_host docker exec -i -u 1000 "$SQE_CONTAINER" sh -s <<'INNER'
 D="/data/TestShow/Season 01"
 printf '1\n00:00:01,000 --> 00:00:03,000\nGood line one\n\n2\n00:00:04,000 --> 00:00:06,000\nGood line two\n' > "$D/TestShow - S01E03.en.srt"

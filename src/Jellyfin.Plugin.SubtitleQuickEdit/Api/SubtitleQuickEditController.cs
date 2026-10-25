@@ -11,6 +11,7 @@ using Jellyfin.Plugin.SubtitleQuickEdit.Configuration;
 using Jellyfin.Plugin.SubtitleQuickEdit.Services;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Activity;
 using MediaBrowser.Model.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -19,18 +20,19 @@ using Microsoft.Extensions.Logging;
 using SubtitleQuickEdit.Core.Editing;
 using SubtitleQuickEdit.Core.Srt;
 using SubtitleQuickEdit.Core.Storage;
+using SubtitleQuickEdit.Core.Submissions;
 
 namespace Jellyfin.Plugin.SubtitleQuickEdit.Api;
 
 /// <summary>
 /// The Subtitle Quick Edit server API. The client sends an item id and a subtitle stream index, never a path:
-/// the file is found from Jellyfin's own library data.
+/// the file is found from Jellyfin's own library data. The submission routes are in the other part of this class.
 /// </summary>
 [ApiController]
 [Route("SubtitleQuickEdit")]
 [Authorize]
 [Produces("application/json")]
-public class SubtitleQuickEditController : ControllerBase
+public partial class SubtitleQuickEditController : ControllerBase
 {
     private const string ElevationPolicy = "RequiresElevation";
     private const string UserIdClaim = "Jellyfin-UserId";
@@ -41,6 +43,7 @@ public class SubtitleQuickEditController : ControllerBase
 
     private readonly SubtitleTrackResolver resolver;
     private readonly IUserManager userManager;
+    private readonly IActivityManager activityManager;
     private readonly ILogger<SubtitleQuickEditController> logger;
 
     /// <summary>
@@ -48,15 +51,33 @@ public class SubtitleQuickEditController : ControllerBase
     /// </summary>
     /// <param name="resolver">Finds items and subtitle files.</param>
     /// <param name="userManager">The user manager.</param>
+    /// <param name="activityManager">Jellyfin's activity log, where new submissions are announced to admins.</param>
     /// <param name="logger">The logger.</param>
     public SubtitleQuickEditController(
         SubtitleTrackResolver resolver,
         IUserManager userManager,
+        IActivityManager activityManager,
         ILogger<SubtitleQuickEditController> logger)
     {
         this.resolver = resolver;
         this.userManager = userManager;
+        this.activityManager = activityManager;
         this.logger = logger;
+    }
+
+    /// <summary>
+    /// What a caller wants to do with an item.
+    /// </summary>
+    private enum Need
+    {
+        /// <summary>Open the editor: list the tracks and read the cues.</summary>
+        Read,
+
+        /// <summary>Save edits or restore an earlier version.</summary>
+        Edit,
+
+        /// <summary>Submit edits for review.</summary>
+        Submit,
     }
 
     /// <summary>
@@ -73,7 +94,7 @@ public class SubtitleQuickEditController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult<IReadOnlyList<SubtitleTrackDto>> GetSubtitles([FromRoute] Guid itemId)
     {
-        (BaseItem? item, ObjectResult? denied) = Authorize(itemId);
+        (BaseItem? item, _, ObjectResult? denied) = Authorize(itemId, Need.Read);
         if (item is null)
         {
             return denied!;
@@ -130,7 +151,7 @@ public class SubtitleQuickEditController : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public ActionResult<CuesResponse> GetCues([FromRoute] Guid itemId, [FromRoute] int streamIndex)
     {
-        (BaseItem? item, ObjectResult? denied) = Authorize(itemId);
+        (BaseItem? item, _, ObjectResult? denied) = Authorize(itemId, Need.Read);
         if (item is null)
         {
             return denied!;
@@ -158,14 +179,14 @@ public class SubtitleQuickEditController : ControllerBase
     }
 
     /// <summary>
-    /// Applies edits to a subtitle file. Admins only.
+    /// Applies edits to a subtitle file. Admins, and users the settings allow to edit.
     /// </summary>
     /// <param name="itemId">The id of the item the subtitle belongs to, for saving.</param>
     /// <param name="streamIndex">The index of the subtitle stream that is edited.</param>
     /// <param name="cancellationToken">Cancels reading the request body.</param>
     /// <response code="200">Saved.</response>
     /// <response code="400">The request or an edit is invalid.</response>
-    /// <response code="403">Not an administrator.</response>
+    /// <response code="403">The caller may not save edits.</response>
     /// <response code="404">No such item or stream.</response>
     /// <response code="409">The file changed since it was loaded, or a cue's text no longer matches.</response>
     /// <response code="413">The request is larger than 1 MB.</response>
@@ -173,7 +194,6 @@ public class SubtitleQuickEditController : ControllerBase
     /// <response code="500">The file could not be written (the body says why).</response>
     /// <returns>The new hash and the saved cue positions.</returns>
     [HttpPost("Items/{itemId}/Subtitles/{streamIndex}/Edits")]
-    [Authorize(Policy = ElevationPolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -186,17 +206,17 @@ public class SubtitleQuickEditController : ControllerBase
         [FromRoute] int streamIndex,
         CancellationToken cancellationToken)
     {
+        (BaseItem? item, _, ObjectResult? denied) = Authorize(itemId, Need.Edit);
+        if (item is null)
+        {
+            return denied!;
+        }
+
         // The size is checked here, before anything reads the body, so an oversized request gets a clean 413 instead of
         // an exception from the web server.
         if (Request.ContentLength > MaxRequestBytes)
         {
             return Error(StatusCodes.Status413PayloadTooLarge, "RequestTooLarge", "The request is larger than 1 MB.");
-        }
-
-        BaseItem? item = resolver.FindVideo(itemId);
-        if (item is null)
-        {
-            return Error(StatusCodes.Status404NotFound, "ItemNotFound", "No such item.");
         }
 
         TrackResolution resolution = resolver.Resolve(item, streamIndex);
@@ -222,10 +242,8 @@ public class SubtitleQuickEditController : ControllerBase
             return invalid!;
         }
 
-        PluginConfiguration config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-        string backupFolder = Plugin.Instance?.BackupFolder ?? Path.Combine(Path.GetTempPath(), "SubtitleQuickEdit", "backups");
-        var service = new SubtitleSaveService(new SafeFileWriter(), new BackupStore(backupFolder, config.BackupMode, config.BackupKeepLastSaves));
-        long? runtimeMs = item.RunTimeTicks.HasValue ? item.RunTimeTicks.Value / TimeSpan.TicksPerMillisecond : null;
+        SubtitleSaveService service = NewSaveService();
+        long? runtimeMs = RuntimeMs(item);
 
         try
         {
@@ -269,20 +287,20 @@ public class SubtitleQuickEditController : ControllerBase
 
     /// <summary>
     /// Puts a subtitle back to an earlier version kept in the plugin's backups (the original, an earlier save, or the
-    /// restore point kept at the first save of an editing session), chosen by the hash of its content. Admins only.
+    /// restore point kept at the first save of an editing session), chosen by the hash of its content. Admins, and
+    /// users the settings allow to edit.
     /// </summary>
     /// <param name="itemId">The item id.</param>
     /// <param name="streamIndex">The subtitle stream index.</param>
     /// <param name="cancellationToken">Cancels reading the request body.</param>
     /// <response code="200">Restored, or the file already had that content.</response>
     /// <response code="400">The request is invalid.</response>
-    /// <response code="403">Not an administrator.</response>
+    /// <response code="403">The caller may not save edits.</response>
     /// <response code="404">No such item, stream or kept version.</response>
     /// <response code="409">The file changed since it was loaded.</response>
     /// <response code="500">The file could not be written (the body says why).</response>
     /// <returns>The new hash.</returns>
     [HttpPost("Items/{itemId}/Subtitles/{streamIndex}/Restore")]
-    [Authorize(Policy = ElevationPolicy)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -293,15 +311,15 @@ public class SubtitleQuickEditController : ControllerBase
         [FromRoute] int streamIndex,
         CancellationToken cancellationToken)
     {
+        (BaseItem? item, _, ObjectResult? denied) = Authorize(itemId, Need.Edit);
+        if (item is null)
+        {
+            return denied!;
+        }
+
         if (Request.ContentLength > MaxRequestBytes)
         {
             return Error(StatusCodes.Status413PayloadTooLarge, "RequestTooLarge", "The request is larger than 1 MB.");
-        }
-
-        BaseItem? item = resolver.FindVideo(itemId);
-        if (item is null)
-        {
-            return Error(StatusCodes.Status404NotFound, "ItemNotFound", "No such item.");
         }
 
         TrackResolution resolution = resolver.Resolve(item, streamIndex);
@@ -321,9 +339,7 @@ public class SubtitleQuickEditController : ControllerBase
             return Error(StatusCodes.Status400BadRequest, "InvalidRequest", "The request needs baseHash and targetHash (SHA-256, hex).");
         }
 
-        PluginConfiguration config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-        string backupFolder = Plugin.Instance?.BackupFolder ?? Path.Combine(Path.GetTempPath(), "SubtitleQuickEdit", "backups");
-        var service = new SubtitleSaveService(new SafeFileWriter(), new BackupStore(backupFolder, config.BackupMode, config.BackupKeepLastSaves));
+        SubtitleSaveService service = NewSaveService();
 
         try
         {
@@ -465,33 +481,50 @@ public class SubtitleQuickEditController : ControllerBase
         return Error(StatusCodes.Status500InternalServerError, code, ex.Message);
     }
 
-    /// <summary>
-    /// Decides whether the caller may use the editor on an item, and finds the item. Admins always may; others
-    /// only when submissions are on and the item is visible to them (library access included).
-    /// </summary>
-    private (BaseItem? Item, ObjectResult? Denied) Authorize(Guid itemId)
+    private static PluginConfiguration Config() => Plugin.Instance?.Configuration ?? new PluginConfiguration();
+
+    private static long? RuntimeMs(BaseItem item) =>
+        item.RunTimeTicks.HasValue ? item.RunTimeTicks.Value / TimeSpan.TicksPerMillisecond : null;
+
+    private static SubtitleSaveService NewSaveService()
     {
-        bool admin = User.IsInRole(AdministratorRole);
-        if (!admin && Plugin.Instance?.Configuration.AllowUserSubmissions != true)
+        PluginConfiguration config = Config();
+        string backupFolder = Plugin.Instance?.BackupFolder ?? Path.Combine(Path.GetTempPath(), "SubtitleQuickEdit", "backups");
+        return new SubtitleSaveService(new SafeFileWriter(), new BackupStore(backupFolder, config.BackupMode, config.BackupKeepLastSaves));
+    }
+
+    /// <summary>
+    /// Works out what the caller may do, from their token and the settings.
+    /// </summary>
+    private EditorRights Rights()
+    {
+        var user = Guid.TryParse(User.FindFirst(UserIdClaim)?.Value, out Guid userId) ? userManager.GetUserById(userId) : null;
+        return EditorRights.From(user, User.IsInRole(AdministratorRole), Config());
+    }
+
+    /// <summary>
+    /// Decides whether the caller may use the editor on an item for what they want to do, and finds the item. Admins
+    /// always may. Others need the right from the settings, and the item must be visible to them (library access
+    /// included); without any right they get 403 before the item is looked up, so they cannot probe for items.
+    /// </summary>
+    private (BaseItem? Item, EditorRights Rights, ObjectResult? Denied) Authorize(Guid itemId, Need need)
+    {
+        EditorRights rights = Rights();
+        string? refusal = !rights.CanRead ? "You are not allowed to use Subtitle Quick Edit."
+            : need == Need.Edit && !rights.CanEdit ? "Your changes need an administrator's approval: submit them for review instead."
+            : need == Need.Submit && !rights.CanSubmit ? "You can save your changes directly; there is nothing to submit."
+            : null;
+        if (refusal is not null)
         {
-            return (null, Error(StatusCodes.Status403Forbidden, "Forbidden", "Only administrators can use Subtitle Quick Edit."));
+            return (null, rights, Error(StatusCodes.Status403Forbidden, "Forbidden", refusal));
         }
 
         BaseItem? item = resolver.FindVideo(itemId);
-        if (item is null)
+        if (item is null || (!rights.IsAdmin && (rights.User is null || !item.IsVisibleStandalone(rights.User))))
         {
-            return (null, Error(StatusCodes.Status404NotFound, "ItemNotFound", "No such item."));
+            return (null, rights, Error(StatusCodes.Status404NotFound, "ItemNotFound", "No such item."));
         }
 
-        if (!admin)
-        {
-            var user = Guid.TryParse(User.FindFirst(UserIdClaim)?.Value, out Guid userId) ? userManager.GetUserById(userId) : null;
-            if (user is null || !item.IsVisibleStandalone(user))
-            {
-                return (null, Error(StatusCodes.Status404NotFound, "ItemNotFound", "No such item."));
-            }
-        }
-
-        return (item, null);
+        return (item, rights, null);
     }
 }

@@ -15,7 +15,7 @@ Nothing is deployed to a live server yet.
 | `src/Jellyfin.Plugin.SubtitleQuickEdit` | The plugin: controller, settings page, item/stream resolver, startup logging, File Transformation registration |
 | `src/Jellyfin.Plugin.SubtitleQuickEdit/Client` | The web player script: `logic.js` (page-free logic, Node-tested in `test/`), `quickedit.js` (button and panel), `quickedit.css` |
 | `tests/SubtitleQuickEdit.Core.Tests` | xUnit tests of the core |
-| `testdata/` | Scripts for the throwaway Jellyfin test server: fixtures, users, `stage2_api_tests.py`, the TestWebm library (`make_webm.sh`, `reset_webm03_srt.sh`) |
+| `testdata/` | Scripts for the throwaway Jellyfin test server: fixtures, users, `stage2_api_tests.py`, `stage4_api_tests.py`, the TestWebm library (`make_webm.sh`, `reset_webm03_srt.sh`) |
 | `testdata/browser` | Browser tests: `stage3_tests.py` (headless Chromium against the test server), `fake_page_smoke.js` (no server), `reload_spike.py` |
 | `devtools/` | `sync.sh`, `dotnet.sh` (build/test in the SDK container on the test host), `prepare_mismatch.sh`, `mutation_check.py` |
 | `STAGE0-NOTES.md` | What Jellyfin 12.2 actually does (cache, encoding, refresh) |
@@ -31,7 +31,7 @@ settings from the environment (see `devtools/env.sh`; there are no defaults, a m
 | `SQE_HOST_EXEC` | Command prefix that runs a command string on the test host; it gets the whole quoted command as one last argument (stdin is passed through) | `ssh myhost`, `ssh myhost pct exec 103 --`, or `sh -c` for a local test server |
 | `SQE_TEST_ROOT` | Test server folder on that host, holding `config/`, `media/` and `src/` | `/srv/jellyfin-test` |
 | `JF_BASE` | Test server URL, used by `testdata/*.py` | `http://test-host:8097` |
-| `SQE_LOG_CMD` | Optional: command that prints the test container's last 2000 log lines to stdout, for `stage2_api_tests.py` (default: `docker logs --tail 2000 $SQE_CONTAINER` through `SQE_HOST_EXEC`). Split like a shell line, no pipes | `my-log-tool jellyfin-test 2000` |
+| `SQE_LOG_CMD` | Optional: command that prints the test container's last 2000 log lines to stdout, for `stage2_api_tests.py` and `stage4_api_tests.py` (default: `docker logs --tail 2000 $SQE_CONTAINER` through `SQE_HOST_EXEC`). Split like a shell line, no pipes | `my-log-tool jellyfin-test 2000` |
 | `SQE_CONTAINER` | Optional: test server container name (default `jellyfin-test`) | |
 | `SQE_DIR` | Optional: synced project folder on the host (default `$SQE_TEST_ROOT/src/sqe`) | |
 
@@ -51,6 +51,9 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
   Jellyfin writes its own `meta.json`. `UtfUnknown.dll` is not shipped: the plugin uses the copy Jellyfin already has.
 - API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>` resets the fixtures and runs 75 checks against the
   test server (see below).
+- Stage 4 API tests: `python3 -I testdata/stage4_api_tests.py <secrets-dir>` covers "Allow user edits", `Me`, and
+  submitting, withdrawing, approving (also after the file changed, with conflicts and in part) and rejecting. It uses
+  `testuser` (sees the library) and `limiteduser` (does not), and puts the settings back to the defaults at the end.
 - `devtools/mutation_check.py` breaks the code in scratch copies (17 ways) and requires the unit tests to fail for each break. Last run: control passed, 17 of 17 killed.
 - Client, no server needed: `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js` (158 tests),
   `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` (38 of 38 killed), and with Playwright for
@@ -80,10 +83,34 @@ Every error answer has the shape `{ "code", "message", "cueIndex"?, "currentHash
 
 | Method and route | Who | Answers |
 |---|---|---|
-| `GET Items/{itemId}/Subtitles` | admins; other users only when submissions are on and the item is visible to them (library access included) | the item's subtitle streams: `streamIndex`, `language`, `title`, `external`, `format`, `editable`, `reason` |
+| `GET Me` | anyone signed in | `isAdmin`, `canEdit`, `canSubmit`, `submissionsOn`, `pendingReviews` (admins only, else null), `maxNoteLength` |
+| `GET Items/{itemId}/Subtitles` | editors and submitters (below), for items visible to them (library access included) | the item's subtitle streams: `streamIndex`, `language`, `title`, `external`, `format`, `editable`, `reason` |
 | `GET Items/{itemId}/Subtitles/{streamIndex}/Cues` | same | `hash` (SHA-256 of the file), `encoding`, and the cues (`index` = 1-based position, `start`, `end` in ms, `text` with `\n`) |
-| `POST Items/{itemId}/Subtitles/{streamIndex}/Edits` | admins only (403 for everyone else) | `hash`, `savedCueIndexes`, `addedCues` (client id to position), `writeMethod` |
-| `POST Items/{itemId}/Subtitles/{streamIndex}/Restore` | admins only | `hash`, `restored` (false when the file already had that content), `writeMethod` |
+| `POST Items/{itemId}/Subtitles/{streamIndex}/Edits` | editors (403 for everyone else) | `hash`, `savedCueIndexes`, `addedCues` (client id to position), `writeMethod` |
+| `POST Items/{itemId}/Subtitles/{streamIndex}/Restore` | editors | `hash`, `restored` (false when the file already had that content), `writeMethod` |
+| `POST Items/{itemId}/Subtitles/{streamIndex}/Submissions` | submitters | the stored submission (below) |
+| `GET Submissions/Mine` | anyone signed in | the caller's own submissions, newest first, in every state |
+| `POST Submissions/{id}/Withdraw` | the submitter, while pending (also with submissions off) | the submission, now `Withdrawn` |
+| `GET Submissions?status=pending\|decided\|all` | admins | submissions, newest first (default `pending`) |
+| `POST Submissions/{id}/Approve` | admins, while submissions are on | `submission`, `applied`, `hash`?, `writeMethod`? |
+| `POST Submissions/{id}/Reject` | admins, while submissions are on | the submission, now `Rejected` |
+
+Who: **admins** may do everything. **Editors** are admins plus the users that "Allow user edits" lets save directly
+(all users, or the selected ones). **Submitters** are the other users, when "Allow user submissions" is on; an editor
+never submits. Editors that are not admins cannot review submissions or change settings.
+
+Submission body: like an Edits body plus `"note"?` (at most 500 characters). It is checked exactly as a save would be
+and stored as a pending submission in `data/SubtitleQuickEdit/submissions/{id}.json` (outside the plugin folder); the
+file is not touched, and Jellyfin's activity log gets an entry so admins notice. A submission answers with `id`,
+`userId`, `userName`, `itemId`, `itemName`, `streamIndex`, `streamLabel`, `baseHash`, `note`, `created`, `state`
+(`Pending`, `Approved`, `PartlyApproved`, `Rejected`, `Withdrawn`), `decided`, `decidedBy`, `reason` and `edits` (each
+with `type`, the edit's fields, `cueStart` and `outcome`: `Pending`, `Applied`, `Conflict`, `NotChosen`, plus a
+`message` for a conflict). Approve body: `{ "edits"?: [0-based indexes] }` (all when left out). When the file changed
+since the submission, each edited line is looked for again (same position and text, else the one line with the same
+start and text); changes not found are conflicts and are not written. If no chosen change can be written, nothing is
+written, `applied` is false and the submission stays pending with its conflicts marked. Reject body: `{ "reason"? }`.
+The newest 50 decided submissions are kept; pending ones are never deleted. Extra codes: 404 `SubmissionNotFound`;
+409 `NotPending` / `SubmissionsOff`; 400 `TextTooLong` / `InvalidChoice`; 429 `TooManyPending`; 500 `StorageFailed`.
 
 Edits body: `{ "baseHash", "edits": [ {"type":"edit","cueIndex","oldText","newText"} | {"type":"add","clientId","startMs","endMs","text"} ], "keepRestorePoint"? }`.
 With `keepRestorePoint` (the editor sends it on the first save of a browser session) the file as it was is also kept
@@ -94,8 +121,8 @@ point) whose SHA-256 is `targetHash`, after backing up the current file. 404 `Re
 409 `FileChanged` when the file's hash is not `baseHash`. The panel's "Revert to original" button uses it.
 
 Status codes: 400 `InvalidRequest` / `InvalidEdit` / `CueNotFound` / `NotEditable` (embedded, not .srt, not local); 403
-`Forbidden`; 404 `ItemNotFound` / `StreamNotFound` (a non-admin cannot probe for items: without access, or with
-submissions off, they get 403 or 404 as appropriate and never a hint of what exists); 409 `FileChanged` (with
+`Forbidden`; 404 `ItemNotFound` / `StreamNotFound` (a non-admin cannot probe for items: without any right they get
+403 before the item is looked up, and without library access 404, never a hint of what exists); 409 `FileChanged` (with
 `currentHash`) / `TextMismatch` (with `cueIndex`); 413 `RequestTooLarge` (over 1 MB); 422 `Unrepresentable` /
 `NotEditable` (file not parseable); 500 `NotWritable` (names the folder and the user) / `WriteFailed` /
 `VerificationFailed` / `LeftoverUnrecoverable`. A refused request never changes the file, makes a backup or leaves a
@@ -130,8 +157,10 @@ are marked failed. `window.SubtitleQuickEdit.debugState()` shows the client's st
 
 | Setting | Default | |
 |---|---|---|
-| Allow user submissions | Off | Stage 4 uses it; from stage 2 it already decides whether non-admins may read cues |
-| Max pending submissions per user | 50 | Stage 4 |
+| Allow user submissions | Off | Other users may submit edits for an admin to approve |
+| Allow user edits (`UserEdits`) | Off | `AllUsers` or `SelectedUsers`: those users save directly, like an admin, without approval |
+| Users allowed to edit (`UserEditUserIds`) | none | For `SelectedUsers`: Jellyfin user ids |
+| Max pending submissions per user | 50 | |
 | Backups | Original only | or "Original + last N saves" |
 | N (`BackupKeepLastSaves`) | 5 | Added: the spec's "last N" needs a number |
 
