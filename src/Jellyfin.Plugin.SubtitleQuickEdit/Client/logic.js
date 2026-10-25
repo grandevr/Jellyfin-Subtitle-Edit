@@ -1118,6 +1118,76 @@
         return { index: i.menuIndex, source: 'menu', confirmed: false };
     }
 
+    // ---- making a subtitle track inside the video editable ----------------------------------------------------
+
+    /**
+     * What the panel offers for a subtitle track that is inside the video. track is the plugin's listing entry,
+     * preview the server's Extract preview (null while it loads). Answers { kind, index? }:
+     * 'none' (not extractable), 'switch' (an editable copy already is a track: index), 'loading', 'make' (nothing there
+     * yet), 'replace' (a file of that name exists and the caller may replace it; index when it is a track) or
+     * 'exists' (a file of that name exists and the caller may not replace it; index when it is a track).
+     */
+    function extractChoice(track, preview) {
+        if (!track || !track.extractable) {
+            return { kind: 'none' };
+        }
+
+        if (typeof track.extractedStreamIndex === 'number') {
+            return { kind: 'switch', index: track.extractedStreamIndex };
+        }
+
+        if (!preview) {
+            return { kind: 'loading' };
+        }
+
+        if (!preview.exists) {
+            return { kind: 'make' };
+        }
+
+        const index = typeof preview.existingStreamIndex === 'number' ? preview.existingStreamIndex : null;
+        return { kind: preview.canReplace ? 'replace' : 'exists', index: index };
+    }
+
+    /**
+     * Lines up the lines of the file that is there now with the lines from the video, by position, for the side-by-side
+     * comparison before a Replace. Each row is { left, right, same }; left or right is null past the end of one side.
+     */
+    function lineUpCues(existing, extracted) {
+        const a = existing || [];
+        const b = extracted || [];
+        const rows = [];
+        let differing = 0;
+        for (let i = 0; i < Math.max(a.length, b.length); i++) {
+            const left = a[i] || null;
+            const right = b[i] || null;
+            const same = Boolean(left && right && left.start === right.start && left.end === right.end && left.text === right.text);
+            if (!same) {
+                differing++;
+            }
+
+            rows.push({ left: left, right: right, same: same });
+        }
+
+        return { rows: rows, differing: differing };
+    }
+
+    /**
+     * The server command that restarts this page's playback at the same place with another subtitle track: needed for
+     * a track the player did not have when playback started, such as a copy made just now.
+     */
+    function playWithSubtitle(sessionId, itemId, positionMs, streamIndex) {
+        return {
+            path: 'Sessions/' + encodeURIComponent(sessionId) + '/Playing',
+            params: {
+                playCommand: 'PlayNow',
+                itemIds: itemId,
+                mediaSourceId: itemId,
+                startPositionTicks: Math.max(0, Math.round(positionMs || 0)) * 10000,
+                subtitleStreamIndex: streamIndex,
+            },
+        };
+    }
+
     return {
         MAX_TIME_MS: MAX_TIME_MS,
         MIN_CUE_MS: MIN_CUE_MS,
@@ -1153,5 +1223,8 @@
         parseMenuId: parseMenuId,
         sessionsCanConfirm: sessionsCanConfirm,
         resolveSubtitleTrack: resolveSubtitleTrack,
+        extractChoice: extractChoice,
+        lineUpCues: lineUpCues,
+        playWithSubtitle: playWithSubtitle,
     };
 }));

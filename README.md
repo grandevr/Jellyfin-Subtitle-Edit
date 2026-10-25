@@ -5,17 +5,17 @@ files, and from 1.1 also WebVTT (`.vtt`) and ASS/SSA (`.ass`, `.ssa`). Until 1.0
 internal name (`SubtitleQuickEdit`: assembly, API routes, data and plugin folders) is unchanged so settings, backups and
 submissions carry over. Spec: the "Jellyfin Subtitle Quick-Edit Plugin — Spec" doc. Licence: GPL-3.0 (see `LICENSE`).
 
-Status: **1.0 is live**; 1.1 (WebVTT and ASS/SSA editing, stage 5) is in progress.
+Status: **1.1 is live**; 1.2 (making subtitle tracks inside a video editable, stage 6) is in progress.
 
 ## Versions
 
-Docs name versions as 1.0, 1.1, 1.2; Jellyfin shows them with four numbers (1.1.0.0), which is also the plugin's
-folder name (`SubtitleQuickEdit_1.1.0.0`), so an update removes the old versioned folder.
+Docs name versions as 1.0, 1.1, 1.2; Jellyfin shows them with four numbers (1.2.0.0), which is also the plugin's
+folder name (`SubtitleQuickEdit_1.2.0.0`), so an update removes the old versioned folder.
 
 | Version | What | Code |
 |---|---|---|
-| 1.2 | Extract an embedded text track to an editable file next to the video (stage 6) | planned |
-| 1.1 | Edit WebVTT (`.vtt`) and ASS/SSA (`.ass`, `.ssa`) files as well as `.srt` (stage 5) | in progress |
+| 1.2 | Make an embedded text track editable: a copy in its own format next to the video, Replace with a comparison for admins, the copies listed in the settings (stage 6) | in progress |
+| 1.1 | Edit WebVTT (`.vtt`) and ASS/SSA (`.ass`, `.ssa`) files as well as `.srt` (stage 5); renamed to Subtitle Editor | main c19c155, 2026-10-25 |
 | 1.0 | `.srt` editing in the web player, backups and Revert, submissions for review and "Allow user edits" (stages 0 to 4). Built as 0.2.0.0 | main ff112ca, 2026-10-25 |
 
 ## Layout
@@ -58,7 +58,7 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
   the test is there to catch.
 - Install on the test server only: build the plugin straight into its plugin folder
   (`DOCKER_FLAGS="-v $SQE_TEST_ROOT/config/data/plugins:/plugins" devtools/dotnet.sh build
-  src/Jellyfin.Plugin.SubtitleQuickEdit -c Release -o /plugins/SubtitleQuickEdit_1.1.0.0`, after removing any older `SubtitleQuickEdit_*` folder) and restart the container.
+  src/Jellyfin.Plugin.SubtitleQuickEdit -c Release -o /plugins/SubtitleQuickEdit_1.2.0.0`, after removing any older `SubtitleQuickEdit_*` folder) and restart the container.
   Jellyfin writes its own `meta.json`. `UtfUnknown.dll` is not shipped: the plugin uses the copy Jellyfin already has.
 - API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>` resets the fixtures and runs 75 checks against the
   test server (see below).
@@ -69,16 +69,18 @@ A convenient place for them is an untracked `local.env` in the repo root (git-ig
   episode 3's and checks cues, refusals, saves byte for byte (BOM, CRLF, tags, comments and other blocks kept), backups
   with the subtitle's extension, Restore, and an approved submission on an ASS file. It resets the fixtures at the end.
 - `devtools/mutation_check.py` breaks the code in scratch copies (38 ways) and requires the unit tests to fail for each break.
-- Client, no server needed: `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js` (174 tests),
-  `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` (49 of 49 killed), and with Playwright for
-  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (79 checks against a fake jellyfin-web page, as admin, submitter and a user without rights, and with an ASS file drawn as text or by JASSUB), and
-  `node testdata/browser/config_page_smoke.js` (14 checks of the settings page with a mock server).
+- Client, no server needed: `node --test src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/*.test.js` (181 tests),
+  `node src/Jellyfin.Plugin.SubtitleQuickEdit/Client/test/mutation-check.js` (54 of 54 killed), and with Playwright for
+  Node on `NODE_PATH`, `node testdata/browser/fake_page_smoke.js` (89 checks against a fake jellyfin-web page, as admin, submitter and a user without rights, with an ASS file drawn as text or by JASSUB, and with a track inside the video), and
+  `node testdata/browser/config_page_smoke.js` (18 checks of the settings page with a mock server).
 - Client against the test server: `testdata/browser/stage3_tests.py` (see its header; also the stage 4 user modes, which
   change the plugin settings and put the defaults back). It needs the TestWebm library and
   changes test subtitles: TestWebm 01 is restored through the API; run `testdata/reset_webm03_srt.sh` in the test
   container before and after, because the API cannot remove the line it adds to TestWebm 03.
   `testdata/browser/stage5_tests.py` (same way of running) edits TestWebm 03's `.vtt` and `.ass` and restores them
   through the API; run `testdata/reset_webm03_formats.sh` in the test container once before the first run.
+  `testdata/browser/stage6_tests.py` (same way of running) makes an editable copy of TestWebm 03's embedded track
+  through the panel, edits it, and deletes the copy through the API at the end.
 - Stage 6 API tests: `python3 -I testdata/stage6_api_tests.py <secrets-dir>` makes episode 3's embedded track editable
   as a submitter, edits it, compares and replaces it as admin, lists and deletes it, and checks the file's owner and
   mode, the backups, the library refresh and the activity log entry. It resets the fixtures at the end.

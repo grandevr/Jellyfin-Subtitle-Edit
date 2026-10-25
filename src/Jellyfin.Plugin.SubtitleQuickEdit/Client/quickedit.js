@@ -30,6 +30,7 @@
     const NUDGE_MS = 100; // the new-line form's -100 ms / +100 ms buttons
     const SEEK_INSIDE_MS = 200; // Previous, Next and a row click seek this far into a line, so the player shows that line
     const PREVIEW_LEAD_MS = 1000; // Preview starts this long before the new line
+    const TOAST_MS = 8000; // how long a message outside the panel stays
     const LOG = '[SubtitleQuickEdit]';
 
     const L = window.SqeLogic;
@@ -56,7 +57,7 @@
         tracks: {}, // itemId -> promise of the plugin's subtitle list
         cues: {}, // 'itemId:streamIndex' -> { hash, encoding, format, timePrecisionMs, cues }, fetched once per playback
         models: {}, // 'itemId:streamIndex' -> StagingModel with the staged changes, kept for the life of the page
-        target: null, // { itemId, streamIndex, track } when the active track is editable, else null
+        target: null, // { itemId, streamIndex, track, extract } when the active track is editable or can be made so, else null
         panel: null, // the open panel's elements, or null
         resumeOnClose: false,
         preview: null, // the timer that pauses the video at the end of a new line's Preview
@@ -298,7 +299,10 @@
             const track = (list || []).filter(function (t) {
                 return t.streamIndex === index;
             })[0];
-            state.target = track && track.editable ? { itemId: s.itemId, streamIndex: index, track: track } : null;
+            // A text track inside the video gets the button too: the panel offers to make an editable copy.
+            state.target = track && (track.editable || track.extractable)
+                ? { itemId: s.itemId, streamIndex: index, track: track, extract: !track.editable }
+                : null;
             updateButton();
             return state.target;
         }, function () {
@@ -354,12 +358,26 @@
 
     // ---- the button ------------------------------------------------------------------------------------------------
 
+    function buttonLabel() {
+        if (state.target && state.target.extract) {
+            return 'Make this subtitle editable';
+        }
+
+        return state.mode === 'submit' ? 'Suggest a subtitle fix' : 'Edit subtitle line';
+    }
+
+    function labelButton(button) {
+        const label = buttonLabel();
+        if (button.title !== label) {
+            button.title = label;
+            button.setAttribute('aria-label', label);
+        }
+    }
+
     function makeButton(floating) {
         const button = el('button', floating ? 'sqe-edit-button sqe-floating' : 'sqe-edit-button autoSize paper-icon-button-light');
         button.type = 'button';
-        const label = state.mode === 'submit' ? 'Suggest a subtitle fix' : 'Edit subtitle line';
-        button.title = label;
-        button.setAttribute('aria-label', label);
+        labelButton(button);
         const icon = el('span', floating ? 'material-icons edit' : 'xlargePaperIconButton material-icons edit');
         icon.setAttribute('aria-hidden', 'true');
         button.appendChild(icon);
@@ -404,6 +422,7 @@
                 }
             }
 
+            labelButton(button);
             removeButtons(button);
             return;
         }
@@ -419,6 +438,7 @@
             document.body.appendChild(floating);
         }
 
+        labelButton(floating);
         removeButtons(floating);
     }
 
@@ -794,6 +814,8 @@
         tags.title = 'Show and edit the styling codes in each line, such as {\\an8} or <i>';
         tags.hidden = true;
         const cues = el('div', 'sqe-cues');
+        const extract = el('section', 'sqe-extract');
+        extract.hidden = true;
         const actions = el('div', 'sqe-actions');
         actions.appendChild(button('sqe-apply', 'Apply', 'Stage the change (Ctrl+Enter)', function () {
             applyCurrent();
@@ -848,6 +870,7 @@
         root.appendChild(nav);
         root.appendChild(tags);
         root.appendChild(cues);
+        root.appendChild(extract);
         root.appendChild(actions);
         root.appendChild(changes);
         root.appendChild(mine);
@@ -856,7 +879,8 @@
         changes.hidden = true;
         mine.hidden = true;
         return {
-            root: root, status: status, nav: nav, tags: tags, tagsBox: tagsBox, cues: cues, actions: actions, changes: changes,
+            root: root, title: title, status: status, nav: nav, tags: tags, tagsBox: tagsBox, cues: cues, extract: extract,
+            actions: actions, changes: changes,
             list: list, note: note,
             mine: mine, mineList: mineList, pending: pending, submitting: submitting, shown: [], form: null,
         };
@@ -864,6 +888,10 @@
 
     /** The panel's main button: Save, or Submit for review. */
     function primaryAction() {
+        if (state.panel && state.panel.extracting) {
+            return; // the make-a-copy view has its own buttons
+        }
+
         if (state.panel && state.panel.submitting) {
             submitChanges();
         } else {
@@ -2016,11 +2044,15 @@
             }
 
             if (!state.target) {
-                showStatus('The subtitle on screen cannot be edited here (only external .srt, .vtt, .ass and .ssa files can).', true);
+                showStatus('The subtitle on screen cannot be edited here (only .srt, .vtt, .ass and .ssa files, and text tracks inside the video, can).', true);
                 return null;
             }
 
             const target = state.target;
+            if (target.extract) {
+                return showExtract(target);
+            }
+
             return loadCues(target).then(function (loaded) {
                 if (!state.panel || seq !== state.playbackSeq) {
                     return;
@@ -2068,6 +2100,224 @@
         }
 
         state.resumeOnClose = false;
+    }
+
+    // ---- a subtitle track inside the video: make an editable copy next to it ----------------------------------------
+
+    function extractPath(target) {
+        return 'SubtitleQuickEdit/Items/' + encodeURIComponent(target.itemId) + '/Subtitles/' + target.streamIndex + '/Extract';
+    }
+
+    /** Shows what can be done with a track inside the video, after fetching the server's preview when needed. */
+    function showExtract(target, note) {
+        const panel = state.panel;
+        if (!panel) {
+            return Promise.resolve();
+        }
+
+        panel.extracting = { target: target, preview: null, confirmReplace: false };
+        panel.title.textContent = 'Make this subtitle editable';
+        const first = L.extractChoice(target.track, null);
+        if (first.kind === 'switch') {
+            renderExtract(first, note);
+            return Promise.resolve();
+        }
+
+        showStatus('Reading the subtitle track…');
+        const seq = state.playbackSeq;
+        return apiGet(extractPath(target)).then(function (preview) {
+            if (state.panel !== panel || seq !== state.playbackSeq) {
+                return;
+            }
+
+            panel.extracting.preview = preview;
+            renderExtract(L.extractChoice(target.track, preview), note);
+        }, function (err) {
+            return describeError(err).then(function (message) {
+                showStatus('Could not read the subtitle track: ' + message, true);
+            });
+        });
+    }
+
+    function renderExtract(choice, note) {
+        const panel = state.panel;
+        const box = panel.extract;
+        const preview = panel.extracting.preview;
+        box.textContent = '';
+        box.hidden = false;
+        showStatus(note || '');
+        box.appendChild(el('p', 'sqe-extract-intro', 'This subtitle is inside the video file, so it cannot be edited there. ' +
+            'An editable copy is a separate subtitle file next to the video. The video itself is not changed.'));
+        const buttons = el('div', 'sqe-extract-actions');
+        if (choice.kind === 'switch') {
+            box.appendChild(el('p', 'sqe-extract-what', 'An editable copy of this subtitle is already there.'));
+            buttons.appendChild(button('sqe-switch sqe-primary', 'Switch to the editable copy', 'Show the copy, then edit it', function () {
+                switchTo(choice.index, '');
+            }));
+        } else if (choice.kind === 'make') {
+            box.appendChild(el('p', 'sqe-extract-what', 'The copy will be “' + preview.fileName + '” (' +
+                preview.cueCount + (preview.cueCount === 1 ? ' line).' : ' lines).') +
+                (state.isAdmin ? '' : ' It is made right away, and admins can see who made it.')));
+            buttons.appendChild(button('sqe-make sqe-primary', 'Make editable copy', 'Write the copy next to the video', function () {
+                makeCopy(false);
+            }));
+        } else {
+            box.appendChild(el('p', 'sqe-extract-what', 'A subtitle file named “' + preview.fileName + '” is already next to the video' +
+                (choice.kind === 'replace' ? '.' : ', and only an admin can replace it.')));
+            if (choice.kind === 'replace') {
+                box.appendChild(comparison(preview));
+                buttons.appendChild(button('sqe-replace', panel.extracting.confirmReplace ? 'Click again to replace' : 'Replace it with the copy from the video',
+                    'The file there now is kept in the backups', function () {
+                        if (!panel.extracting.confirmReplace) {
+                            panel.extracting.confirmReplace = true;
+                            renderExtract(choice, note);
+                            return;
+                        }
+
+                        makeCopy(true);
+                    }));
+            }
+
+            if (typeof choice.index === 'number') {
+                buttons.appendChild(button('sqe-switch' + (choice.kind === 'exists' ? ' sqe-primary' : ''), 'Switch to that file',
+                    'Show that file, then edit it', function () {
+                        switchTo(choice.index, '');
+                    }));
+            } else if (choice.kind === 'exists') {
+                box.appendChild(el('p', 'sqe-hint', 'Ask an admin to look at it.'));
+            }
+        }
+
+        box.appendChild(buttons);
+    }
+
+    /** Admins: the file there now and the track from the video side by side, before a Replace. */
+    function comparison(preview) {
+        const wrap = el('div', 'sqe-compare');
+        if (!preview.existingCues) {
+            wrap.appendChild(el('p', 'sqe-hint', 'The file there now cannot be read as subtitles' +
+                (preview.existingReason ? ': ' + preview.existingReason : '.')));
+            return wrap;
+        }
+
+        const lined = L.lineUpCues(preview.existingCues, preview.cues);
+        wrap.appendChild(el('p', 'sqe-compare-summary', lined.differing === 0 ? 'They have the same lines.'
+            : lined.differing + (lined.differing === 1 ? ' line differs.' : ' lines differ.')));
+        const table = el('table', 'sqe-compare-table');
+        const head = el('tr');
+        head.appendChild(el('th', null, 'File there now'));
+        head.appendChild(el('th', null, 'From the video'));
+        table.appendChild(head);
+        lined.rows.forEach(function (row) {
+            const tr = el('tr', row.same ? 'sqe-same' : 'sqe-differs');
+            [row.left, row.right].forEach(function (cue) {
+                const td = el('td');
+                if (cue) {
+                    td.appendChild(el('span', 'sqe-compare-time', L.formatTime(cue.start)));
+                    td.appendChild(el('span', 'sqe-compare-text', cue.text));
+                }
+
+                tr.appendChild(td);
+            });
+            table.appendChild(tr);
+        });
+        wrap.appendChild(table);
+        return wrap;
+    }
+
+    function setExtractBusy(busy) {
+        const panel = state.panel;
+        if (panel) {
+            panel.busy = busy;
+            panel.extract.querySelectorAll('button').forEach(function (b) {
+                b.disabled = busy;
+            });
+        }
+    }
+
+    function makeCopy(replace) {
+        const panel = state.panel;
+        if (!panel || !panel.extracting || panel.busy) {
+            return;
+        }
+
+        const target = panel.extracting.target;
+        const preview = panel.extracting.preview;
+        setExtractBusy(true);
+        showStatus(replace ? 'Replacing the file…' : 'Making the editable copy…');
+        apiPost(extractPath(target), replace ? { replace: true, expectedExistingHash: preview.existingHash } : {}).then(function (made) {
+            delete state.tracks[target.itemId]; // the item has a new track now
+            if (state.panel !== panel) {
+                return;
+            }
+
+            const done = (made.replaced ? 'Replaced “' : 'Made “') + made.fileName + '”.';
+            if (typeof made.streamIndex === 'number') {
+                switchTo(made.streamIndex, done);
+            } else {
+                setExtractBusy(false);
+                panel.extract.hidden = true;
+                showStatus(done + ' Jellyfin is still adding it: in a minute, stop and start the video and choose it in the subtitle menu.');
+            }
+        }, function (err) {
+            return errorDetails(err).then(function (details) {
+                if (state.panel !== panel) {
+                    return;
+                }
+
+                setExtractBusy(false);
+                const code = details.body && details.body.code;
+                if (details.status === 409 && (code === 'FileExists' || code === 'FileChanged')) {
+                    // Someone made a file of that name meanwhile, or it changed since the comparison: show it again.
+                    showExtract(target, code === 'FileExists' ? 'A file of that name was made meanwhile.' : 'The file changed since you compared it; here it is again.');
+                    return;
+                }
+
+                showStatus('Could not make the copy: ' + ((details.body && details.body.message) || 'the request failed.'), true);
+            });
+        });
+    }
+
+    /**
+     * Shows another subtitle track. The player only knows the tracks it had when playback started, so playback is started
+     * again at the same place with that track, through the server (the same way another device would cast).
+     */
+    function switchTo(streamIndex, done) {
+        const panel = state.panel;
+        const session = state.session;
+        const video = state.video;
+        if (!session || !session.id || !video) {
+            showStatus((done ? done + ' ' : '') + 'Stop and start the video, then choose it in the subtitle menu.');
+            return;
+        }
+
+        const play = L.playWithSubtitle(session.id, session.itemId, L.secondsToMs(video.currentTime), streamIndex);
+        setExtractBusy(true);
+        showStatus((done ? done + ' ' : '') + 'Switching to it…');
+        state.resumeOnClose = false; // the new playback starts by itself
+        apiPost(play.path, undefined, play.params, true).then(function () {
+            toast((done ? done + ' ' : '') + 'Press the edit button to fix a line.');
+        }, function (err) {
+            return describeError(err).then(function (message) {
+                if (state.panel === panel) {
+                    setExtractBusy(false);
+                    showStatus('Could not switch: ' + message + ' Choose it in the subtitle menu after restarting the video.', true);
+                }
+            });
+        });
+    }
+
+    /** A short message at the bottom of the screen that outlives the panel (switching tracks restarts playback). */
+    function toast(text) {
+        document.querySelectorAll('.sqe-toast').forEach(function (t) {
+            t.remove();
+        });
+        const t = el('div', 'sqe-toast', text);
+        t.setAttribute('role', 'status');
+        document.body.appendChild(t);
+        setTimeout(function () {
+            t.remove();
+        }, TOAST_MS);
     }
 
     // ---- keys: while the panel has focus, no key reaches the player -------------------------------------------------

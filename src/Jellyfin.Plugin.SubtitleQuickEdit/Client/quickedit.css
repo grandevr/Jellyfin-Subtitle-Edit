@@ -503,3 +503,69 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
         padding-right: 80px;
     }
 }
+
+/* A subtitle track inside the video: the offer to make an editable copy, and for admins the comparison before a Replace. */
+.sqe-extract p {
+    margin: 0 0 10px;
+    line-height: 1.4;
+}
+
+.sqe-extract-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.sqe-compare-summary {
+    font-weight: 600;
+}
+
+.sqe-compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 0.9em;
+}
+
+.sqe-compare-table th,
+.sqe-compare-table td {
+    padding: 4px 6px;
+    border: 1px solid var(--sqe-line);
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.sqe-compare-table tr.sqe-differs td {
+    background: var(--sqe-field);
+}
+
+.sqe-compare-table tr.sqe-differs td:last-child {
+    border-left: 2px solid var(--sqe-warning);
+}
+
+.sqe-compare-time {
+    display: block;
+    color: var(--sqe-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.sqe-compare-text {
+    white-space: pre-line;
+}
+
+.sqe-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 96px;
+    z-index: 1001;
+    max-width: min(90vw, 480px);
+    padding: 10px 16px;
+    transform: translateX(-50%);
+    border-radius: 6px;
+    background: var(--sqe-bg);
+    color: var(--sqe-fg);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    line-height: 1.4;
+}

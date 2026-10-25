@@ -66,6 +66,12 @@ const MUTATIONS = [
     { name: 'splitStyleTags: ASS keeps only the first block', from: "const ASS_LEADING_TAGS = /^(?:\\{[^}]*\\})+/;", to: "const ASS_LEADING_TAGS = /^\\{[^}]*\\}/;" },
     { name: 'screenText: \\h left as is', from: ".replace(/\\\\h/g, ' ')", to: "" },
     { name: 'hasStyleTags: not for WebVTT', from: "return format === 'ass' || format === 'vtt';", to: "return format === 'ass';" },
+    // ---- making a track inside the video editable ----
+    { name: 'extractChoice: an existing copy is not offered first', from: "if (typeof track.extractedStreamIndex === 'number') {", to: 'if (false) {' },
+    { name: 'extractChoice: everyone may replace', from: "return { kind: preview.canReplace ? 'replace' : 'exists', index: index };", to: "return { kind: 'replace', index: index };" },
+    { name: 'lineUpCues: the end time is not compared', from: 'left.start === right.start && left.end === right.end && left.text === right.text', to: 'left.start === right.start && left.text === right.text' },
+    { name: 'lineUpCues: stops at the shorter side', from: 'for (let i = 0; i < Math.max(a.length, b.length); i++) {', to: 'for (let i = 0; i < Math.min(a.length, b.length); i++) {' },
+    { name: 'playWithSubtitle: position sent in ms, not ticks', from: 'startPositionTicks: Math.max(0, Math.round(positionMs || 0)) * 10000,', to: 'startPositionTicks: Math.max(0, Math.round(positionMs || 0)),' },
 ];
 
 function runTests(logicFile) {

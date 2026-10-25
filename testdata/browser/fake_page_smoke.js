@@ -22,6 +22,10 @@ function showJassub() {
   }
 }
 const ROLE = (location.search.match(/role=(\\w+)/) || [])[1] || 'admin'; // admin, submitter or none
+const EMBEDDED = location.search.indexOf('embedded=1') >= 0; // the track is inside the video: the panel offers a copy
+const EXISTING = location.search.indexOf('existing=1') >= 0; // ...and a file of the copy's name is already there
+window.fakeParams = {};
+window.fakeExtractSent = [];
 window.fakeSubs = [];
 window.fakeEvents = null;
 function renderCustom() { // jellyfin-web's updateSubtitleText: the first cue that covers the time, or hidden
@@ -64,7 +68,15 @@ setTimeout(() => {
   window.addEventListener('keydown', (e) => window.jfKeys.push('w:' + e.key), true);
   const R = {
     'Sessions': () => [{ Id: 's1', NowPlayingItem: { Id: 'abc', RunTimeTicks: 600000000 }, PlayState: { MediaSourceId: 'abc', SubtitleStreamIndex: 0 } }],
-    'SubtitleQuickEdit/Items/abc/Subtitles': () => [{ streamIndex: 0, external: true, format: FORMAT, editable: true }],
+    'SubtitleQuickEdit/Items/abc/Subtitles': () => EMBEDDED
+      ? [{ streamIndex: 0, external: false, format: 'subrip', editable: false, extractable: true, reason: 'Embedded subtitle tracks cannot be edited.' }]
+      : [{ streamIndex: 0, external: true, format: FORMAT, editable: true, extractable: false }],
+    'SubtitleQuickEdit/Items/abc/Subtitles/0/Extract': () => EXISTING
+      ? Object.assign({ fileName: 'Ep.en.srt', format: 'srt', cueCount: 2, exists: true, existingHash: 'e1', existingStreamIndex: 3,
+        existingIsExtracted: false, canReplace: ROLE === 'admin' }, ROLE === 'admin' ? {
+        cues: [{ index: 1, start: 0, end: 2000, text: 'Hello there' }, { index: 2, start: 3000, end: 4000, text: 'Two' }],
+        existingCues: [{ index: 1, start: 0, end: 2000, text: 'Hello there' }, { index: 2, start: 3000, end: 4000, text: 'Two, edited' }] } : {})
+      : { fileName: 'Ep.en.srt', format: 'srt', cueCount: 2, exists: false, canReplace: ROLE === 'admin' },
     'SubtitleQuickEdit/Items/abc/Subtitles/0/Cues': () => { const f = file(); return { hash: f.hash, encoding: 'utf-8', format: FORMAT, timePrecisionMs: FORMAT === 'ass' ? 10 : 1, cues: f.cues }; },
     // Jellyfin leaves null fields out: a non-admin's answer has no pendingReviews.
     'SubtitleQuickEdit/Me': () => ROLE === 'admin' ? { isAdmin: true, canEdit: true, canSubmit: false, submissionsOn: true, pendingReviews: 2, maxNoteLength: 500 }
@@ -72,7 +84,7 @@ setTimeout(() => {
     'SubtitleQuickEdit/Submissions/Mine': () => window.fakeSubs,
   };
   window.ApiClient = { getCurrentUserId: () => 'u1', getCurrentUser: () => Promise.resolve({ Policy: { IsAdministrator: true } }),
-    isLoggedIn: () => true, accessToken: () => 't', deviceId: () => 'd', getUrl: (p) => p,
+    isLoggedIn: () => true, accessToken: () => 't', deviceId: () => 'd', getUrl: (p, q) => { if (q) { window.fakeParams[p] = q; } return p; },
     getJSON: (u) => R[u] ? Promise.resolve(copy(R[u]())) : Promise.reject(new Error('no ' + u)),
     ajax: (o) => {
       const body = o.data ? JSON.parse(o.data) : null;
@@ -91,6 +103,15 @@ setTimeout(() => {
         f.n++; f.hash = 'h' + f.n; store(f);
         return Promise.resolve({ hash: f.hash, savedCueIndexes: body.edits.filter((e) => e.type === 'edit').map((e) => e.cueIndex),
           addedCues: added, writeMethod: 'Rename' });
+      }
+      if (o.url === 'SubtitleQuickEdit/Items/abc/Subtitles/0/Extract') {
+        window.fakeExtractSent.push(body);
+        if (EXISTING && !body.replace) { return refused(409, { code: 'FileExists', message: 'exists', currentHash: 'e1' }); }
+        return Promise.resolve({ fileName: 'Ep.en.srt', hash: 'x1', replaced: Boolean(body.replace), streamIndex: 3, refreshPending: false });
+      }
+      if (o.url === 'Sessions/s1/Playing') {
+        window.fakePlaying = window.fakeParams['Sessions/s1/Playing'];
+        return o.dataType === 'json' ? Promise.reject(new SyntaxError('Unexpected end of JSON input')) : Promise.resolve(undefined);
       }
       if (o.url === 'SubtitleQuickEdit/Items/abc/Subtitles/0/Submissions') {
         const f = file();
@@ -525,6 +546,63 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
     (await j.$eval('.sqe-status', (e) => e.textContent)).indexOf('Subtitles reloaded') === 0 &&
     (await j.evaluate(() => window.fakeJassubShown)) === 2 && Boolean(await j.$('.JASSUB'));
   await j.close();
+
+  // 6c: a subtitle track inside the video. The panel offers an editable copy, then restarts playback on it.
+  async function embeddedPage(query) {
+    const page = await b.newPage();
+    await page.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+    page.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+    page.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
+    await page.goto(ORIGIN + '/web/index.html?embedded=1' + query);
+    await page.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+    return page;
+  }
+
+  const e1 = await embeddedPage('');
+  checks['embedded: the button offers to make the subtitle editable'] =
+    (await e1.$eval('.sqe-edit-button', (x) => x.getAttribute('aria-label'))) === 'Make this subtitle editable';
+  await e1.click('.sqe-edit-button');
+  await e1.waitForSelector('.sqe-make', { timeout: 5000 });
+  checks['embedded: the panel names the copy and its lines, and edits nothing yet'] =
+    (await e1.$eval('.sqe-title', (x) => x.textContent)) === 'Make this subtitle editable' &&
+    (await e1.$eval('.sqe-extract-what', (x) => x.textContent)).indexOf('\u201cEp.en.srt\u201d (2 lines)') >= 0 &&
+    !(await e1.$('.sqe-cue-text')) && await e1.$eval('.sqe-actions', (x) => x.hidden);
+  await e1.keyboard.press('Control+s');
+  checks['embedded: Ctrl+S does not make a copy'] = (await e1.evaluate(() => window.fakeExtractSent.length)) === 0;
+  await e1.click('.sqe-make');
+  await e1.waitForFunction(() => window.fakePlaying, null, { timeout: 5000 }).catch(() => null);
+  const playing = await e1.evaluate(() => window.fakePlaying);
+  checks['embedded: Make sends one plain request'] = JSON.stringify(await e1.evaluate(() => window.fakeExtractSent)) === '[{}]';
+  checks['embedded: then playback restarts at the same place on the new track'] = Boolean(playing) && playing.playCommand === 'PlayNow' &&
+    playing.itemIds === 'abc' && playing.subtitleStreamIndex === 3 && playing.startPositionTicks === 0;
+  await e1.waitForSelector('.sqe-toast', { timeout: 3000 }).catch(() => null);
+  checks['embedded: a message outside the panel says what happened'] =
+    ((await e1.$eval('.sqe-toast', (x) => x.textContent).catch(() => '')) || '').indexOf('Made \u201cEp.en.srt\u201d.') === 0;
+  await e1.close();
+
+  const e2 = await embeddedPage('&existing=1&role=submitter');
+  await e2.click('.sqe-edit-button');
+  await e2.waitForSelector('.sqe-extract-what', { timeout: 5000 });
+  checks['embedded, name taken, submitter: no Replace, a switch to that file'] =
+    (await e2.$eval('.sqe-extract-what', (x) => x.textContent)).indexOf('only an admin can replace it') >= 0 &&
+    !(await e2.$('.sqe-replace')) && Boolean(await e2.$('.sqe-switch')) && !(await e2.$('.sqe-compare'));
+  await e2.close();
+
+  const e3 = await embeddedPage('&existing=1');
+  await e3.click('.sqe-edit-button');
+  await e3.waitForSelector('.sqe-compare-table', { timeout: 5000 });
+  checks['embedded, name taken, admin: the two files side by side, the differing line marked'] =
+    (await e3.$eval('.sqe-compare-summary', (x) => x.textContent)) === '1 line differs.' &&
+    (await e3.$$eval('.sqe-compare-table tr.sqe-differs td', (els) => els.map((x) => x.textContent).join('|'))) === '00:00:03,000Two, edited|00:00:03,000Two';
+  await e3.click('.sqe-replace');
+  checks['embedded, admin: Replace asks for a second click'] = (await e3.evaluate(() => window.fakeExtractSent.length)) === 0 &&
+    (await e3.$eval('.sqe-replace', (x) => x.textContent)) === 'Click again to replace';
+  await e3.click('.sqe-replace');
+  await e3.waitForFunction(() => window.fakePlaying, null, { timeout: 5000 }).catch(() => null);
+  checks['embedded, admin: Replace sends the hash of the file compared'] =
+    JSON.stringify(await e3.evaluate(() => window.fakeExtractSent)) === '[{"replace":true,"expectedExistingHash":"e1"}]' &&
+    Boolean(await e3.evaluate(() => window.fakePlaying));
+  await e3.close();
 
   checks['no errors in the console'] = logs.every((l) => !/^(error|pageerror)/.test(l));
 

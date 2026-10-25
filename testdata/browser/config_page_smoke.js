@@ -24,6 +24,10 @@ window.subs = [
   { id: 'c3', userName: 'testuser', itemId: 'i1', itemName: 'Show S01E01 Pilot', streamIndex: 2, created: '2026-10-24T00:00:00Z', state: 'Pending',
     edits: [edit(4, 'Four', 'Four fixed')] },
 ];
+window.copies = location.search.indexOf('copies=0') >= 0 ? [] : [
+  { id: 'x1', itemId: 'i1', itemName: 'Show S01E01 Pilot', sourceStreamIndex: 2, fileName: 'Pilot.en.srt', streamIndex: 5, exists: true,
+    edited: true, replaced: false, userId: 'u2', userName: '<b>testuser</b>', created: '2026-10-25T02:00:00Z' },
+];
 function copy(x) { return JSON.parse(JSON.stringify(x)); }
 window.Dashboard = { showLoadingMsg() {}, hideLoadingMsg() {}, processPluginConfigurationUpdateResult() { window.savedOk = true; } };
 window.ApiClient = {
@@ -33,10 +37,12 @@ window.ApiClient = {
     { Id: 'u2', Name: 'testuser', Policy: { IsAdministrator: false } }, { Id: 'u3', Name: 'limiteduser', Policy: { IsAdministrator: false } }]),
   getUrl: (p, params) => p + (params ? '?' + new URLSearchParams(params) : ''),
   getJSON: (u) => {
+    if (u === 'SubtitleQuickEdit/Extracted') { return Promise.resolve(copy(window.copies)); }
     const status = new URLSearchParams(u.split('?')[1] || '').get('status');
     return Promise.resolve(copy(window.subs.filter((s) => (status === 'pending') === (s.state === 'Pending'))));
   },
   ajax: (o) => {
+    if (o.type === 'DELETE') { window.sent.push({ url: o.url, type: 'DELETE' }); window.copies = []; return Promise.resolve({ fileName: 'Pilot.en.srt', backedUp: true }); }
     const b = JSON.parse(o.data); window.sent.push({ url: o.url, body: b });
     const m = /Submissions\\/(\\w+)\\/(Approve|Reject)$/.exec(o.url); const s = window.subs.find((x) => x.id === m[1]);
     if (m[2] === 'Reject') { s.state = 'Rejected'; s.reason = b.reason; s.decidedBy = 'testadmin'; return Promise.resolve(copy(s)); }
@@ -119,6 +125,28 @@ const html = '<html><head><meta charset="utf-8"></head><body><script>' + mock + 
   await p.waitForFunction(() => document.querySelectorAll('#SqeReviewList .sqe-sub').length === 3);
   checks['Decided lists the three decided ones, without buttons'] = !(await p.$('.sqe-approve')) &&
     (await p.$eval('[data-submission-id="c3"]', (e) => e.textContent)).indexOf('Reason: Already fixed') >= 0;
+  await p.close();
+
+  // 6c: the editable copies made from subtitle tracks inside videos, with Delete.
+  p = await open('');
+  await p.waitForSelector('#SqeExtractedList .sqe-copy', { timeout: 5000 });
+  checks['copies: each copy shows its item, file, who made it (as text) and whether it was edited'] =
+    (await p.$eval('[data-extracted-id="x1"]', (e) => e.textContent)).indexOf('Pilot.en.srt') >= 0 &&
+    (await p.$eval('[data-extracted-id="x1"] .sqe-sub-meta', (e) => e.textContent)).indexOf('<b>testuser</b>') === 0 &&
+    (await p.$eval('[data-extracted-id="x1"] .sqe-sub-meta', (e) => e.textContent)).indexOf('edited since') >= 0 &&
+    !(await p.$('[data-extracted-id="x1"] b'));
+  await p.click('[data-extracted-id="x1"] .sqe-delete-copy');
+  checks['copies: Delete asks for a second click'] = (await p.evaluate(() => window.sent.length)) === 0 &&
+    (await p.$eval('[data-extracted-id="x1"] .sqe-delete-copy', (e) => e.textContent)) === 'Click again to delete';
+  await p.click('[data-extracted-id="x1"] .sqe-delete-copy');
+  await p.waitForFunction(() => document.querySelector('[data-extracted-id="x1"] .sqe-sub-result').textContent.indexOf('Deleted') === 0);
+  last = await p.evaluate(() => window.sent[window.sent.length - 1]);
+  checks['copies: Delete sends one DELETE for that copy and says it is in the backups'] = last.type === 'DELETE' &&
+    last.url === 'SubtitleQuickEdit/Extracted/x1' && !(await p.$('[data-extracted-id="x1"] .sqe-delete-copy'));
+  await p.close();
+  p = await open('?copies=0');
+  await p.waitForSelector('#SqeExtractedEmpty:not([hidden])', { timeout: 5000 }).catch(() => null);
+  checks['copies: with none, the list says so'] = !(await p.$eval('#SqeExtractedEmpty', (e) => e.hidden)) && !(await p.$('.sqe-copy'));
   await p.close();
 
   checks['no errors in the console'] = logs.every((l) => !/^(error|pageerror)/.test(l));

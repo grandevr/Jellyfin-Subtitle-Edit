@@ -13,7 +13,7 @@ Jellyfin on the test host.
   tests against the test server (`testdata/browser/stage3_tests.py`): 42 of 42 at stage 3f, plus the 3g phone checks.
 - The test subtitles are pristine after every browser run (TestWebm 01 restored through the API; TestWebm 03's `.en.srt`
   by `testdata/reset_webm03_srt.sh`).
-- Plugin version is 1.1.0.0 from stage 5a (2026-10-25); 1.0 was built as 0.2.0.0. Remove the old `SubtitleQuickEdit_0.2.0.0` folder when installing.
+- Plugin version is 1.2.0.0 from stage 6c (2026-10-25); 1.1 is 1.1.0.0 and 1.0 was built as 0.2.0.0. Remove the older `SubtitleQuickEdit_*` folder when installing.
 
 ## Done
 
@@ -70,7 +70,9 @@ Plan approved 2026-10-25 (the plan doc "Subtitle Quick Edit 1.1: VTT, ASS and em
 2. Stage 6 = 1.2: extract embedded text tracks to a file next to the video, in their own format.
    - 6a (Core, `Extraction/`): file naming (`Video.en[.default][.forced][.sdh].ext`), `SafeFileWriter.Create` (never
      overwrites), `_replaced` and `_deleted` backups (never pruned), the extracted-files list, `SubtitleExtractor`.
-   - 6b: the extract, preview and delete endpoints, item refresh. 6c: the player panel and the Submissions review.
+   - 6b: the extract, preview and delete endpoints, item refresh. 6c: the player panel ("Make editable copy", then
+     playback restarts on the copy through the session's Play command, since the player only knows the tracks it
+     started with), Replace with a side-by-side comparison for admins, and "Editable copies" in the settings page.
    - 6d: release (live update only with approval).
 3. Keep the Playwright image on the test host until the user says the whole project is finished.
 
@@ -121,7 +123,7 @@ Run `. devtools/env.sh` first (with the settings from `local.env`) so that `sqe_
 - Clean rebuild: `devtools/dotnet.sh build -c Release --no-incremental`
 - Re-arm the foreign-group fixture: `devtools/prepare_mismatch.sh`
 - Unit tests (all integration tests required): `DOCKER_FLAGS="-v $SQE_TEST_ROOT/src/mismatch:/mismatch -v $SQE_TEST_ROOT/media:/fixtures:ro -e SQE_MISMATCH_FILE=/mismatch/file.srt -e SQE_FIXTURE_DIR=/fixtures -e SQE_REQUIRE_INTEGRATION=1" devtools/dotnet.sh test -c Release --no-build`
-- Install the plugin on the TEST server: `DOCKER_FLAGS="-v $SQE_TEST_ROOT/config/data/plugins:/plugins" devtools/dotnet.sh build src/Jellyfin.Plugin.SubtitleQuickEdit -c Release --no-incremental -o /plugins/SubtitleQuickEdit_1.1.0.0` (first `rm -rf $SQE_TEST_ROOT/config/data/plugins/SubtitleQuickEdit_0.2.0.0`)
+- Install the plugin on the TEST server: `DOCKER_FLAGS="-v $SQE_TEST_ROOT/config/data/plugins:/plugins" devtools/dotnet.sh build src/Jellyfin.Plugin.SubtitleQuickEdit -c Release --no-incremental -o /plugins/SubtitleQuickEdit_1.2.0.0` (first `rm -rf $SQE_TEST_ROOT/config/data/plugins/SubtitleQuickEdit_1.1.0.0`)
 - Restart the test server to load it: `sqe_host docker restart jellyfin-test`
 - API tests: `python3 -I testdata/stage2_api_tests.py <secrets-dir>`
 - Mutation check (about 8 minutes): `python3 -I devtools/mutation_check.py`
