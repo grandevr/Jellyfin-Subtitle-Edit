@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Stage 3 browser tests (3c button and panel, 3d editing, 3e saving, 3f adding, 3g phone width), in headless Chromium against the
+"""Stage 3 and 4 browser tests (3c button and panel, 3d editing, 3e saving, 3f adding, 3g phone width; 4c a user who
+submits for review, and a user allowed to edit), in headless Chromium against the
 THROWAWAY test Jellyfin. The saving checks change "TestWebm 01" subtitles through the editor and put the original text
-back. The adding checks add a line to "TestWebm 03.en.srt", which the API cannot undo: run testdata/reset_webm03_srt.sh
+back. The stage 4 checks change the plugin settings and put the defaults back at the end. The adding checks add a line to "TestWebm 03.en.srt", which the API cannot undo: run testdata/reset_webm03_srt.sh
 before and after.
 
 Runs inside the Playwright image (sqe-playwright:1.64.1, Playwright for Python) on a host that can reach JF_BASE:
@@ -659,6 +660,159 @@ def admin_phone(browser, pages):
     ctx.close()
 
 
+PLUGIN_ID = "b3b6f2a4-6f0e-4d5c-9a0c-5e2f6c1d7a31"
+SETTING_DEFAULTS = {"AllowUserSubmissions": False, "UserEdits": "Off", "UserEditUserIds": []}
+
+
+def configure(**settings):
+    st, cfg = api("GET", "/Plugins/%s/Configuration" % PLUGIN_ID, token=TOKEN)
+    cfg.update(settings)
+    req = urllib.request.Request(BASE + "/Plugins/%s/Configuration" % PLUGIN_ID, data=json.dumps(cfg).encode(), method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", 'MediaBrowser Client="s3c", Device="browser-tests", DeviceId="stage3c-tests", Version="1.0", '
+                                    'Token="%s"' % TOKEN)
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return r.status
+
+
+def user_id(name):
+    st, users = api("GET", "/Users", token=TOKEN)
+    return [u["Id"] for u in users if u["Name"] == name][0]
+
+
+def open_panel_at(page, movie, index, cue):
+    play(page, movie)
+    choose_subtitle(page, index)
+    seek_into(page, cue)
+    wait_button(page, True, 15)
+    show_osd(page)
+    page.locator(".sqe-edit-button").first.click()
+    page.wait_for_selector(".sqe-panel .sqe-cue-text", timeout=10000)
+
+
+def wait_status_on(page, text, seconds=15):
+    page.wait_for_function("(t) => { const s = document.querySelector('.sqe-panel .sqe-status');"
+                           " return s && s.textContent.indexOf(t) >= 0; }", arg=text, timeout=seconds * 1000)
+
+
+def pending_submissions():
+    st, body = api("GET", "/SubtitleQuickEdit/Submissions?status=pending", token=TOKEN)
+    return body or []
+
+
+def user_submitting(browser, pages):
+    """4c: with submissions on, a user gets "Suggest a subtitle fix", submits with a note, sees and withdraws it."""
+    movie = MOVIES["TestWebm 01"]
+    srt = [t for t in tracks(movie) if t["external"] and t["format"] == "srt" and t["editable"]]
+    en = ([t for t in srt if t.get("language") in ("en", "eng")] or srt)[0]["streamIndex"]
+    original = cues_full(movie, en)
+    cue = original["cues"][min(3, len(original["cues"]) - 2)]
+    for sub in pending_submissions():
+        api("POST", "/SubtitleQuickEdit/Submissions/%s/Reject" % sub["id"], {}, token=TOKEN)
+    ctx = browser.new_context(viewport={"width": 1280, "height": 720})
+    page = ctx.new_page()
+    pages.append(page)
+    page.on("dialog", lambda d: d.accept())
+    try:
+        check("settings: user submissions on", configure(**dict(SETTING_DEFAULTS, AllowUserSubmissions=True)) == 204)
+        login(page, USER_NAME, USER_PW)
+        play(page, movie)
+        choose_subtitle(page, en)
+        check("submissions on: the button shows for a user", wait_button(page, True, 15))
+        check("the user's button says Suggest a subtitle fix",
+              page.locator(".sqe-edit-button").first.get_attribute("title") == "Suggest a subtitle fix")
+        seek_into(page, cue)
+        show_osd(page)
+        page.locator(".sqe-edit-button").first.click()
+        page.wait_for_selector(".sqe-panel .sqe-cue-text", timeout=10000)
+        check("the user's panel has Submit for review and a note box, no Save, Reload or Revert",
+              page.locator(".sqe-submit").count() == 1 and page.locator(".sqe-note").count() == 1 and
+              page.locator(".sqe-save, .sqe-reload, .sqe-revert").count() == 0)
+        box = page.locator(".sqe-panel .sqe-cue-text").first
+        box.fill(cue["text"] + " (suggested)")
+        box.press("Control+Enter")
+        page.locator(".sqe-note").fill("Browser test note")
+        page.locator(".sqe-submit").click()
+        wait_status_on(page, "Submitted 1 change")
+        pending = pending_submissions()
+        check("Submit stores one pending submission with the note and the change",
+              len(pending) == 1 and pending[0].get("note") == "Browser test note" and pending[0]["userName"] == USER_NAME and
+              pending[0]["edits"][0]["newText"] == cue["text"] + " (suggested)", repr(pending)[:300])
+        check("Submit does not change the file", cues_full(movie, en)["hash"] == original["hash"])
+        page.wait_for_selector(".sqe-mine-item", timeout=5000)
+        check("the panel lists the submission as waiting for review",
+              page.locator(".sqe-mine-item .sqe-badge").first.text_content() == "waiting for review")
+        shot(page, "4c-user-submitted")
+        page.locator(".sqe-withdraw").first.click()
+        page.wait_for_function("() => { const b = document.querySelector('.sqe-mine-item .sqe-badge');"
+                               " return b && b.textContent === 'withdrawn'; }", timeout=8000)
+        check("Withdraw takes it back", pending_submissions() == [] and page.locator(".sqe-withdraw").count() == 0)
+        box = page.locator(".sqe-panel .sqe-cue-text").first
+        box.fill(cue["text"] + " (second try)")
+        box.press("Control+Enter")
+        box.press("Control+s")
+        wait_status_on(page, "Submitted 1 change")
+        check("Ctrl+S submits too", len(pending_submissions()) == 1)
+        ctx.close()
+
+        # The admin sees that a submission waits.
+        ctx = browser.new_context(viewport={"width": 1280, "height": 720})
+        page = ctx.new_page()
+        pages.append(page)
+        login(page, ADMIN_NAME, ADMIN_PW)
+        open_panel_at(page, movie, en, cue)
+        page.wait_for_function("() => { const a = document.querySelector('.sqe-pending'); return a && !a.hidden; }", timeout=8000)
+        check("the admin's panel says 1 submission is waiting for review",
+              page.locator(".sqe-pending").text_content() == "1 submission is waiting for your review")
+        shot(page, "4c-admin-pending")
+    finally:
+        for sub in pending_submissions():
+            api("POST", "/SubtitleQuickEdit/Submissions/%s/Reject" % sub["id"], {"reason": "browser test"}, token=TOKEN)
+        configure(**SETTING_DEFAULTS)
+        ctx.close()
+
+
+def user_editing(browser, pages):
+    """4c: a user allowed to edit saves, reloads and reverts exactly like an admin."""
+    movie = MOVIES["TestWebm 01"]
+    srt = [t for t in tracks(movie) if t["external"] and t["format"] == "srt" and t["editable"]]
+    en = ([t for t in srt if t.get("language") in ("en", "eng")] or srt)[0]["streamIndex"]
+    original = cues_full(movie, en)
+    k = min(3, len(original["cues"]) - 2)
+    cue = original["cues"][k]
+    ctx = browser.new_context(viewport={"width": 1280, "height": 720})
+    page = ctx.new_page()
+    pages.append(page)
+    page.on("dialog", lambda d: d.accept())
+    try:
+        check("settings: user edits for testuser only",
+              configure(**dict(SETTING_DEFAULTS, UserEdits="SelectedUsers", UserEditUserIds=[user_id(USER_NAME)])) == 204)
+        login(page, USER_NAME, USER_PW)
+        open_panel_at(page, movie, en, cue)
+        check("an allowed user gets the editor with Save, Reload and no Submit",
+              page.locator(".sqe-title").text_content() == "Edit subtitle line" and page.locator(".sqe-save").count() == 1 and
+              page.locator(".sqe-reload").count() == 1 and page.locator(".sqe-submit").count() == 0)
+        box = page.locator(".sqe-panel .sqe-cue-text").first
+        box.fill(cue["text"] + " (user saved)")
+        box.press("Control+Enter")
+        box.press("Control+s")
+        wait_status_on(page, "Saved")
+        check("an allowed user's Save writes the file", cues_full(movie, en)["cues"][k]["text"] == cue["text"] + " (user saved)")
+        page.locator(".sqe-reload").click()
+        page.wait_for_function("() => /Subtitles reloaded|Could not reload/.test("
+                               "document.querySelector('.sqe-panel .sqe-status').textContent)", timeout=25000)
+        status = page.locator(".sqe-panel .sqe-status").text_content() or ""
+        check("an allowed user's Reload subtitles works", status.startswith("Subtitles reloaded"), status)
+        page.locator(".sqe-revert").click()
+        wait_status_on(page, "Reverted to the original", 25)
+        check("an allowed user's Revert to original puts the file back", cues_full(movie, en)["hash"] == original["hash"])
+        shot(page, "4c-user-editor")
+    finally:
+        restore_texts(movie, en, original["cues"])
+        configure(**SETTING_DEFAULTS)
+        ctx.close()
+
+
 def non_admin(browser, pages):
     ctx = browser.new_context(viewport={"width": 1280, "height": 720})
     page = ctx.new_page()
@@ -668,14 +822,15 @@ def non_admin(browser, pages):
     hidden = wait_button(page, False, 2) and not wait_button(page, True, 8)
     check("button hidden for a non-admin", hidden)
     state = page.evaluate("() => window.SubtitleQuickEdit && window.SubtitleQuickEdit.debugState()")
-    check("the client knows the user is not an admin", bool(state) and state["isAdmin"] is False, repr(state))
+    check("the client knows the user is not an admin and has no editor",
+          bool(state) and state["isAdmin"] is False and state["mode"] is None, repr(state))
     shot(page, "3c-non-admin")
     ctx.close()
 
 
 with sync_playwright() as p:
     browser = p.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
-    for scenario in (admin_desktop, admin_editing, admin_saving, admin_adding, admin_phone, non_admin):
+    for scenario in (admin_desktop, admin_editing, admin_saving, admin_adding, admin_phone, non_admin, user_submitting, user_editing):
         pages = []
         try:
             scenario(browser, pages)

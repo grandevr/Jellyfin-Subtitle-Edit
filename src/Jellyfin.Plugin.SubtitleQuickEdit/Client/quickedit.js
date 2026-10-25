@@ -43,6 +43,8 @@
         client: null,
         userId: null,
         isAdmin: false,
+        me: null, // the server's Me answer: what this user may do
+        mode: null, // 'edit' (save directly), 'submit' (send for review) or null (no editor), from L.editorMode
         video: null, // the current <video>; a new one is created for every playback
         playbackSeq: 0, // bumped on every new playback, so late answers for an old one are ignored
         playbackStartedAt: 0,
@@ -149,6 +151,8 @@
 
         state.userId = userId;
         state.isAdmin = false;
+        state.me = null;
+        state.mode = null;
         state.tracks = {};
         state.cues = {};
         state.models = {};
@@ -157,14 +161,24 @@
             return;
         }
 
-        client.getCurrentUser().then(function (user) {
+        loadMe().then(function () {
+            scheduleRefresh();
+        });
+    }
+
+    /** Asks the server what this user may do (the settings can change at any time). Resolves with the answer or null. */
+    function loadMe() {
+        const userId = state.userId;
+        return apiGet('SubtitleQuickEdit/Me').then(function (me) {
             if (state.userId === userId) {
-                // Stage 3 is for administrators only; the non-admin panel (Submit for review) is stage 4.
-                state.isAdmin = Boolean(user && user.Policy && user.Policy.IsAdministrator);
-                scheduleRefresh();
+                state.me = me || null;
+                state.isAdmin = Boolean(me && me.isAdmin);
+                state.mode = L.editorMode(me);
             }
+
+            return me || null;
         }, function () {
-            // Not known: stay hidden.
+            return null; // Not known: no editor.
         });
     }
 
@@ -265,7 +279,7 @@
         const seq = state.playbackSeq;
         const s = state.session;
         const index = activeStreamIndex();
-        if (!state.isAdmin || !s || index === null || !sameId(s.mediaSourceId, s.itemId)) {
+        if (!state.mode || !s || index === null || !sameId(s.mediaSourceId, s.itemId)) {
             // No item, no subtitle, or an alternate version (only the item's own streams are addressable).
             state.target = null;
             updateButton();
@@ -339,8 +353,9 @@
     function makeButton(floating) {
         const button = el('button', floating ? 'sqe-edit-button sqe-floating' : 'sqe-edit-button autoSize paper-icon-button-light');
         button.type = 'button';
-        button.title = 'Edit subtitle line';
-        button.setAttribute('aria-label', 'Edit subtitle line');
+        const label = state.mode === 'submit' ? 'Suggest a subtitle fix' : 'Edit subtitle line';
+        button.title = label;
+        button.setAttribute('aria-label', label);
         const icon = el('span', floating ? 'material-icons edit' : 'xlargePaperIconButton material-icons edit');
         icon.setAttribute('aria-hidden', 'true');
         button.appendChild(icon);
@@ -701,11 +716,12 @@
     }
 
     function buildPanel() {
-        const root = el('aside', 'sqe-panel');
+        const submitting = state.mode === 'submit';
+        const root = el('aside', 'sqe-panel' + (submitting ? ' sqe-submit-mode' : ''));
         root.setAttribute('role', 'dialog');
         root.setAttribute('aria-label', 'Subtitle Quick Edit');
         const header = el('header', 'sqe-header');
-        const title = el('h2', 'sqe-title', 'Edit subtitle line');
+        const title = el('h2', 'sqe-title', submitting ? 'Suggest a subtitle fix' : 'Edit subtitle line');
         const close = el('button', 'sqe-close', '×');
         close.type = 'button';
         close.title = 'Close (Esc)';
@@ -732,31 +748,88 @@
         actions.appendChild(button('sqe-apply', 'Apply', 'Stage the change (Ctrl+Enter)', function () {
             applyCurrent();
         }));
-        actions.appendChild(button('sqe-save sqe-primary', 'Save', 'Write the staged changes to the file (Ctrl+S)', function () {
-            saveChanges();
-        }));
-        actions.appendChild(button('sqe-reload', 'Reload subtitles', 'Make the player show the saved file', function () {
-            reloadSubtitles();
-        }));
-        actions.appendChild(button('sqe-revert', 'Revert to original',
-            'Put the file back as it was before your changes this session, and drop unsaved changes', function () {
-                revertToOriginal();
+        let note = null;
+        if (submitting) {
+            actions.appendChild(button('sqe-submit sqe-primary', 'Submit for review',
+                'Send the staged changes to an admin, who decides whether they go into the file (Ctrl+S)', function () {
+                    submitChanges();
+                }));
+            note = el('textarea', 'sqe-note');
+            note.rows = 2;
+            note.maxLength = (state.me && state.me.maxNoteLength) || 500;
+            note.placeholder = 'Note for the admin (optional)';
+            note.setAttribute('aria-label', 'Note for the admin');
+            actions.insertBefore(note, actions.firstChild);
+        } else {
+            actions.appendChild(button('sqe-save sqe-primary', 'Save', 'Write the staged changes to the file (Ctrl+S)', function () {
+                saveChanges();
             }));
+            actions.appendChild(button('sqe-reload', 'Reload subtitles', 'Make the player show the saved file', function () {
+                reloadSubtitles();
+            }));
+            actions.appendChild(button('sqe-revert', 'Revert to original',
+                'Put the file back as it was before your changes this session, and drop unsaved changes', function () {
+                    revertToOriginal();
+                }));
+        }
+
         const changes = el('section', 'sqe-changes');
-        const changesTitle = el('h3', 'sqe-changes-title', 'Changes this session');
+        const changesTitle = el('h3', 'sqe-changes-title', submitting ? 'Changes to submit' : 'Changes this session');
         const list = el('ol', 'sqe-change-list');
         changes.appendChild(changesTitle);
         changes.appendChild(list);
+        const mine = el('section', 'sqe-mine');
+        mine.appendChild(el('h3', 'sqe-mine-title', 'Your submissions for this subtitle'));
+        const mineList = el('ol', 'sqe-mine-list');
+        mine.appendChild(mineList);
+        const pending = el('a', 'sqe-pending');
+        pending.href = '#/configurationpage?name=SubtitleQuickEdit';
+        pending.hidden = true;
+        pending.addEventListener('click', function () {
+            closePanel();
+        });
         root.appendChild(header);
+        root.appendChild(pending);
+        if (submitting) {
+            root.appendChild(el('p', 'sqe-hint', 'Your changes go to an admin, who decides whether they go into the subtitle file.'));
+        }
+
         root.appendChild(status);
         root.appendChild(nav);
         root.appendChild(cues);
         root.appendChild(actions);
         root.appendChild(changes);
+        root.appendChild(mine);
         nav.hidden = true;
         actions.hidden = true;
         changes.hidden = true;
-        return { root: root, status: status, nav: nav, cues: cues, actions: actions, changes: changes, list: list, shown: [], form: null };
+        mine.hidden = true;
+        return {
+            root: root, status: status, nav: nav, cues: cues, actions: actions, changes: changes, list: list, note: note,
+            mine: mine, mineList: mineList, pending: pending, submitting: submitting, shown: [], form: null,
+        };
+    }
+
+    /** The panel's main button: Save, or Submit for review. */
+    function primaryAction() {
+        if (state.panel && state.panel.submitting) {
+            submitChanges();
+        } else {
+            saveChanges();
+        }
+    }
+
+    /** Admins: a link to the review list in the settings page, when submissions wait. */
+    function showPendingReviews() {
+        const panel = state.panel;
+        const count = state.me && typeof state.me.pendingReviews === 'number' ? state.me.pendingReviews : 0;
+        if (!panel) {
+            return;
+        }
+
+        panel.pending.hidden = count === 0;
+        panel.pending.textContent = count === 1 ? '1 submission is waiting for your review'
+            : count + ' submissions are waiting for your review';
     }
 
     function showStatus(text, isError) {
@@ -1258,12 +1331,14 @@
             panel.list.appendChild(changeRow(row));
         });
         panel.changes.hidden = rows.length === 0;
-        panel.actions.querySelector('.sqe-save').disabled = panel.busy || !rows.some(function (r) {
+        panel.actions.querySelector('.sqe-primary').disabled = panel.busy || !rows.some(function (r) {
             return r.status === 'staged';
         });
         const revert = panel.actions.querySelector('.sqe-revert');
-        revert.hidden = !canRevert(panel);
-        revert.disabled = panel.busy;
+        if (revert) {
+            revert.hidden = !canRevert(panel);
+            revert.disabled = panel.busy;
+        }
     }
 
     /** True when there is something to revert: unsaved changes, or a file that differs from the session's original. */
@@ -1292,7 +1367,7 @@
     function setBusy(busy) {
         const panel = state.panel;
         panel.busy = busy;
-        panel.actions.querySelectorAll('button').forEach(function (b) {
+        panel.actions.querySelectorAll('button, textarea').forEach(function (b) {
             b.disabled = busy;
         });
         if (!busy) {
@@ -1392,6 +1467,176 @@
             }
 
             return null;
+        });
+    }
+
+    /**
+     * Sends every staged change to an admin for review, with the note (the Submit for review button and Ctrl+S, for
+     * users who may not save directly). The file is not changed; the sent changes leave the list.
+     */
+    function submitChanges() {
+        const panel = state.panel;
+        if (!panel || !panel.model || panel.busy) {
+            return;
+        }
+
+        if (!applyCurrent(true)) {
+            return;
+        }
+
+        const model = panel.model;
+        const target = panel.target;
+        const prepared = model.prepareSave();
+        if (!prepared) {
+            showStatus('Nothing is staged.');
+            return;
+        }
+
+        prepared.request.note = panel.note.value.trim() || null;
+        setBusy(true);
+        showStatus('Submitting\u2026');
+        apiPost('SubtitleQuickEdit/Items/' + encodeURIComponent(target.itemId) + '/Subtitles/' + target.streamIndex + '/Submissions',
+            prepared.request).then(function () {
+            const sent = model.applySubmitSuccess(prepared.rowIds);
+            persist(target, model);
+            refreshOverlay();
+            if (state.panel === panel) {
+                panel.note.value = '';
+                setBusy(false);
+                reshow('Submitted ' + sent + ' change' + (sent === 1 ? '' : 's') + ' for review. An admin decides whether ' +
+                    (sent === 1 ? 'it goes' : 'they go') + ' into the file.');
+                loadMine();
+            }
+        }, function (err) {
+            return errorDetails(err).then(function (details) {
+                const outcome = model.applySaveError(prepared.rowIds, details.status, details.body);
+                if (outcome.action === 'reconcile') {
+                    return refetchCues(target).then(function (loaded) {
+                        const summary = model.reconcile(loaded.cues, loaded.hash);
+                        persist(target, model);
+                        if (state.panel === panel) {
+                            setBusy(false);
+                            reshow('The file changed on disk since it was loaded, so nothing was submitted. ' +
+                                (summary.failed.length > 0
+                                    ? summary.failed.length + ' change' + (summary.failed.length === 1 ? '' : 's') +
+                                      ' no longer match the file (marked failed); the rest are still staged.'
+                                    : 'Your changes still match the file: press Submit again.'));
+                            showStatus(panel.status.textContent, true);
+                        }
+                    });
+                }
+
+                persist(target, model);
+                if (state.panel === panel) {
+                    setBusy(false);
+                    reshow();
+                    showStatus(outcome.action === 'marked' ? 'Nothing was submitted: a change was refused (see the list).'
+                        : 'Nothing was submitted: ' + outcome.message, true);
+                }
+
+                return null;
+            });
+        }).catch(function (err) {
+            if (state.panel === panel) {
+                setBusy(false);
+                return describeError(err).then(function (message) {
+                    showStatus('Something went wrong after submitting: ' + message, true);
+                });
+            }
+
+            return null;
+        });
+    }
+
+    /** Loads the user's own submissions for the panel's subtitle and lists them (shown only when there are some). */
+    function loadMine() {
+        const panel = state.panel;
+        if (!panel || !panel.target) {
+            return Promise.resolve();
+        }
+
+        return apiGet('SubtitleQuickEdit/Submissions/Mine').then(function (list) {
+            if (state.panel === panel) {
+                renderMine(L.submissionsFor(list, panel.target.itemId, panel.target.streamIndex));
+            }
+        }, function () {
+            // The list is a courtesy; the editor works without it.
+        });
+    }
+
+    function submissionChange(edit) {
+        const item = el('li', 'sqe-mine-change');
+        if (edit.type === 'add') {
+            item.appendChild(el('span', 'sqe-change-where', 'New · ' + L.formatTime(edit.startMs) + ' → ' + L.formatTime(edit.endMs)));
+            item.appendChild(el('div', 'sqe-change-new', edit.text));
+        } else {
+            item.appendChild(el('span', 'sqe-change-where', 'Line ' + edit.cueIndex + ' · ' + L.formatTime(edit.cueStart)));
+            item.appendChild(el('div', 'sqe-change-old', edit.oldText));
+            item.appendChild(el('div', 'sqe-change-new', edit.newText));
+        }
+
+        if (edit.outcome && edit.outcome !== 'Pending') {
+            const words = { Applied: 'applied', Conflict: 'conflict', NotChosen: 'not chosen' };
+            item.appendChild(el('span', 'sqe-badge sqe-outcome-' + edit.outcome, words[edit.outcome] || edit.outcome));
+        }
+
+        return item;
+    }
+
+    function renderMine(submissions) {
+        const panel = state.panel;
+        panel.mineList.textContent = '';
+        panel.mine.hidden = submissions.length === 0;
+        submissions.forEach(function (sub) {
+            const item = el('li', 'sqe-mine-item sqe-mine-' + sub.state);
+            item.setAttribute('data-submission-id', sub.id);
+            const top = el('div', 'sqe-change-top');
+            const when = sub.created ? new Date(sub.created).toLocaleString() : '';
+            const count = (sub.edits || []).length;
+            top.appendChild(el('span', 'sqe-change-where', when + ' · ' + count + ' change' + (count === 1 ? '' : 's')));
+            top.appendChild(el('span', 'sqe-badge sqe-state-' + sub.state, L.submissionStateLabel(sub.state)));
+            item.appendChild(top);
+            if (sub.note) {
+                item.appendChild(el('div', 'sqe-mine-note', 'Your note: ' + sub.note));
+            }
+
+            if (sub.reason) {
+                item.appendChild(el('div', 'sqe-change-message', 'Admin: ' + sub.reason));
+            }
+
+            const changes = el('ul', 'sqe-mine-changes');
+            (sub.edits || []).forEach(function (edit) {
+                changes.appendChild(submissionChange(edit));
+            });
+            item.appendChild(changes);
+            if (sub.state === 'Pending') {
+                item.appendChild(button('sqe-withdraw', 'Withdraw', 'Take this submission back', function () {
+                    withdraw(sub.id);
+                }));
+            }
+
+            panel.mineList.appendChild(item);
+        });
+    }
+
+    function withdraw(id) {
+        const panel = state.panel;
+        if (!panel || !window.confirm('Take this submission back? The admin will not see it any more.')) {
+            return;
+        }
+
+        apiPost('SubtitleQuickEdit/Submissions/' + encodeURIComponent(id) + '/Withdraw').then(function () {
+            if (state.panel === panel) {
+                showStatus('Submission withdrawn.');
+                loadMine();
+            }
+        }, function (err) {
+            return describeError(err).then(function (message) {
+                if (state.panel === panel) {
+                    showStatus('Could not withdraw: ' + message, true);
+                    loadMine();
+                }
+            });
         });
     }
 
@@ -1647,6 +1892,9 @@
         document.body.classList.add('sqe-panel-open');
         showStatus('Loading…');
         const seq = state.playbackSeq;
+        if (state.isAdmin) {
+            loadMe().then(showPendingReviews);
+        }
 
         // The authoritative check: ask Sessions again before trusting the button's state.
         loadSession(seq).then(function () {
@@ -1673,6 +1921,7 @@
                 renderChanges();
                 const shown = L.cueForTime(loaded.cues, t === null ? 0 : t);
                 renderCues(shown, made.restored === null ? undefined : made.restored);
+                loadMine();
             });
         }).catch(function (err) {
             return describeError(err).then(function (message) {
@@ -1724,7 +1973,7 @@
                 applyCurrent();
             } else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
                 e.preventDefault(); // never the browser's save dialog
-                saveChanges();
+                primaryAction();
             }
         }
 
@@ -1785,8 +2034,8 @@
             state.sessionTried = false;
         }
 
-        if (state.isAdmin && !state.sessionTried) {
-            // At the start of a playback, or when the admin check finished after playback started.
+        if (state.mode && !state.sessionTried) {
+            // At the start of a playback, or when the rights check finished after playback started.
             state.sessionTried = true;
             loadSession(state.playbackSeq, 0);
             return;
@@ -1816,6 +2065,7 @@
             return {
                 userId: state.userId,
                 isAdmin: state.isAdmin,
+                mode: state.mode,
                 hasVideo: Boolean(state.video),
                 session: state.session ? Object.assign({}, state.session) : null,
                 menu: state.menu ? Object.assign({}, state.menu) : null,

@@ -54,6 +54,12 @@ const MUTATIONS = [
     { name: 'applySaveError: TextMismatch does not reconcile', from: 'if (status === 409 && (b.code === \'FileChanged\' || b.code === \'TextMismatch\')) {', to: 'if (status === 409 && b.code === \'FileChanged\') {' },
     { name: 'prepareSave: failed rows are sent too', from: 'return r.status === \'staged\';', to: 'return r.status !== \'saved\';' },
     { name: 'stageEdit: a second edit of a cue adds a second row', from: 'return r.type === \'edit\' && r.cueIndex === cue.index && r.status !== \'saved\';', to: 'return false;' },
+    // ---- modes and submissions ----
+    { name: 'editorMode: a user who can edit is sent to submit', from: "if (me.canEdit === true) {\n            return 'edit';", to: "if (me.canEdit === true && !me.canSubmit) {\n            return 'edit';" },
+    { name: 'editorMode: any truthy canSubmit counts', from: "return me.canSubmit === true ? 'submit' : null;", to: "return me.canSubmit ? 'submit' : null;" },
+    { name: 'applySubmitSuccess: removes every row', from: 'return !sent.has(r.rowId);', to: 'return false;' },
+    { name: 'submissionsFor: ignores the stream', from: "=== want && s.streamIndex === streamIndex;", to: "=== want;" },
+    { name: 'submissionsFor: oldest first', from: "return String(b.created || '').localeCompare(String(a.created || ''));", to: "return String(a.created || '').localeCompare(String(b.created || ''));" },
 ];
 
 function runTests(logicFile) {
