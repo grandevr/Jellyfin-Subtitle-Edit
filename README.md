@@ -10,6 +10,8 @@ subtitle file next to your video is changed in place, and the original is kept a
 - Lets other users suggest fixes for an admin to approve, or lets chosen users edit directly.
 - Keeps backups of every subtitle before its first edit, with a one-click **Revert to original**.
 
+![Screenshot](docs/Screenshot_20261025_203955.png?raw=true)
+
 ## Requirements
 
 - Jellyfin 12.3 or later.
