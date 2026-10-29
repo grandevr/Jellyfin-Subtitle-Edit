@@ -93,7 +93,10 @@ setTimeout(() => {
         window.fakeEditsSent.push(body);
         const f = file();
         if (body.baseHash !== f.hash) { return refused(409, { code: 'FileChanged', message: 'changed', currentHash: f.hash }); }
-        body.edits.filter((e) => e.type === 'edit').forEach((e) => { f.cues[e.cueIndex - 1].text = e.newText; });
+        body.edits.filter((e) => e.type === 'edit').forEach((e) => {
+          const c = f.cues[e.cueIndex - 1]; c.text = e.newText;
+          if (typeof e.startMs === 'number') { c.start = e.startMs; c.end = e.endMs; } // new times; the line keeps its place
+        });
         const added = {};
         body.edits.filter((e) => e.type === 'add').forEach((e) => {
           const cue = { start: e.startMs, end: e.endMs, text: e.text, clientId: e.clientId };
@@ -437,6 +440,72 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   checks['custom renderer: a staged new line shows on screen at its time'] = (await shown()) === 'Gap line';
   info.custom = { c1, c2, reloadStatus };
   await q.close();
+
+  // Changing the times of an existing line: the pencil next to its times opens the Add line form for that line.
+  const t = await b.newPage();
+  await t.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  t.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
+  t.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+  t.on('dialog', (d) => d.accept());
+  await t.goto(ORIGIN + '/web/index.html');
+  await t.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  await t.click('.sqe-edit-button');
+  await t.waitForSelector('.sqe-cue-text', { timeout: 5000 });
+  const tField = (k) => t.inputValue('.sqe-new-line .sqe-' + k);
+  const tErr = (k) => t.$eval('#sqe-new-' + k, (e) => { const x = e.closest('.sqe-field').querySelector('.sqe-field-error'); return x.hidden ? '' : x.textContent; });
+  const tTrack = () => t.evaluate(() => Array.from(Array.from(document.querySelector('video').textTracks).find((x) => x.label === 'manualTrack').cues)
+    .map((c) => Math.round(c.startTime * 1000) + '-' + Math.round(c.endTime * 1000) + ':' + c.text.replace(/[\u200e\u200f]/g, '')).join('|'));
+  checks['timing: each editable line has a pencil next to its times'] =
+    (await t.$eval('.sqe-cue .sqe-cue-when', (e) => e.querySelector('.sqe-cue-time').textContent + '|' + e.querySelector('.sqe-retime').title)) ===
+    '00:00:00,000 → 00:00:02,000|Change the times of line 1';
+  await t.fill('.sqe-cue-text', 'Hello typed');
+  await t.click('.sqe-retime');
+  await t.waitForSelector('.sqe-new-line', { timeout: 3000 });
+  checks['timing: the pencil opens the line form with its times, its typed text, and the end field focused'] =
+    (await t.$eval('.sqe-new-line .sqe-cue-number', (e) => e.textContent)) === 'Line 1' &&
+    (await tField('start')) === '00:00:00,000' && (await tField('end')) === '00:00:02,000' &&
+    (await t.inputValue('.sqe-new-text')) === 'Hello typed' && (await t.evaluate(() => document.activeElement.id)) === 'sqe-new-end';
+  checks['timing: the line does not warn about overlapping itself'] = await t.$eval('.sqe-warning', (e) => e.hidden);
+  await t.click('.sqe-cancel');
+  checks['timing: Cancel keeps the text typed in the box'] = (await t.inputValue('.sqe-cue-text')) === 'Hello typed';
+  await t.fill('.sqe-cue-text', 'Hello there');
+  await t.click('.sqe-retime');
+  await t.fill('.sqe-new-line .sqe-start', '00:00:01,000');
+  await t.fill('.sqe-new-line .sqe-end', '00:00:00,500');
+  await t.click('.sqe-apply');
+  checks['timing: an end before the start is refused on the end field'] = (await tErr('end')) === 'A line must end after it starts.';
+  await t.fill('.sqe-new-line .sqe-start', '00:00:00,000');
+  await t.fill('.sqe-new-line .sqe-end', '00:01:30,000');
+  await t.click('.sqe-apply');
+  checks['timing: an end past the runtime is refused'] = (await tErr('end')) === 'A line must not end after the end of the video.';
+  await t.fill('.sqe-new-line .sqe-end', '00:00:01,500');
+  await t.keyboard.press('Control+Enter');
+  const tRows = await t.$$eval('.sqe-change', (els) => els.map((e) => e.textContent));
+  checks['timing: Apply stages the new times, shown in the list and in the line heading'] = !(await t.$('.sqe-new-line')) &&
+    tRows.length === 1 && tRows[0].indexOf('Line 1 · 00:00:00,000staged00:00:00,000 → 00:00:02,00000:00:00,000 → 00:00:01,500') === 0 &&
+    (await t.$eval('.sqe-cue .sqe-cue-time', (e) => e.className + '|' + e.textContent)) === 'sqe-cue-time sqe-time-changed|00:00:00,000 → 00:00:01,500';
+  checks['timing: the player shows the line with its new times'] = (await tTrack()).split('|')[0] === '0-1500:Hello there';
+  if (process.env.SQE_SHOTS) {
+    await t.screenshot({ path: process.env.SQE_SHOTS + '/fake-timing-lines.png' });
+    await t.click('.sqe-retime');
+    await t.screenshot({ path: process.env.SQE_SHOTS + '/fake-timing-form.png' });
+    await t.click('.sqe-cancel');
+  }
+  await t.click('.sqe-save');
+  await t.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Saved') === 0, null, { timeout: 5000 });
+  const tSent = await t.evaluate(() => window.fakeEditsSent[window.fakeEditsSent.length - 1].edits);
+  checks['timing: Save sends the line with its new times'] = JSON.stringify(tSent) ===
+    JSON.stringify([{ type: 'edit', cueIndex: 1, oldText: 'Hello there', newText: 'Hello there', startMs: 0, endMs: 1500 }]);
+  checks['timing: the file has the new times'] = (await t.evaluate(() => file().cues[0].end)) === 1500;
+  await t.$eval('.sqe-change-saved .sqe-undo-saved', (e) => e.click());
+  checks['timing: Undo on the saved change stages the old times'] =
+    (await t.$$eval('.sqe-change-staged', (els) => els.map((e) => e.textContent))).some((x) => x.indexOf('00:00:00,000 → 00:00:02,000') > 0) &&
+    (await tTrack()).split('|')[0] === '0-2000:Hello there';
+  await t.setViewportSize({ width: 390, height: 844 });
+  const pencil = await t.$eval('.sqe-retime', (e) => { const r = e.getBoundingClientRect(); return Math.round(r.width) + 'x' + Math.round(r.height); });
+  checks['timing: at phone width the pencil is a 44 px touch target'] = pencil === '44x44';
+  info.pencil = pencil;
+  await t.close();
 
   // A user who may only submit: same editing, but Submit for review instead of Save, and their own submissions.
   const r = await b.newPage();

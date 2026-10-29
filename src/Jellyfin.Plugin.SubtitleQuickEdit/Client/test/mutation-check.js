@@ -43,7 +43,10 @@ const MUTATIONS = [
     { name: 'reconcile: the new hash is dropped', from: 'this.baseHash = freshHash;', to: 'void freshHash;' },
     { name: 'reconcile: relocations are not reported', from: 'if (found.index !== row.cueIndex) {', to: 'if (false) {' },
     { name: 'reconcile: a kept edit keeps its old times', from: 'row.start = found.start;\n                    row.end = found.end;\n                    summary.kept.push(row.rowId);', to: 'summary.kept.push(row.rowId);' },
-    { name: 'restore: no relocation, same number only', from: 'const found = locateCue(row, self.cues);', to: 'const found = findCueByIndex(self.cues, row.cueIndex);' },
+    { name: 'locateStaged: a retimed row ignores times changed on disk', from: 'return found && timesChanged(row) && (found.start !== row.start || found.end !== row.end) ? null : found;', to: 'return found;' },
+    { name: 'prepareSave: new times are not sent', from: 'edit.endMs = r.newEnd;', to: 'edit.endMs = r.end;' },
+    { name: 'stageEdit: a text-only edit forgets staged times', from: 'let newStart = timesChanged(existing) ? existing.newStart : null;', to: 'let newStart = null;' },
+    { name: 'restore: no relocation, same number only', from: 'const found = locateStaged(row, self.cues);', to: 'const found = findCueByIndex(self.cues, row.cueIndex);' },
     // ---- renumbering and error marking ----
     { name: 'shiftPosition: an insert at the cue\'s own number does not push it', from: 'if (added[i] <= position) {', to: 'if (added[i] < position) {' },
     { name: 'shiftPosition: inserted numbers are not sorted', from: 'const added = (addedPositions || []).slice().sort(function (a, b) {', to: 'const added = (addedPositions || []).slice().sort(function (a, b) {\n            return b - a;' },

@@ -442,10 +442,10 @@ public partial class SubtitleQuickEditController : ControllerBase
             switch (dto?.Type)
             {
                 case "edit" when dto.CueIndex is >= 1 && dto.OldText is not null && dto.NewText is not null:
-                    edits.Add(new SubtitleTextEdit(dto.CueIndex.Value, dto.OldText, dto.NewText));
+                    edits.Add(new SubtitleTextEdit(dto.CueIndex.Value, dto.OldText, dto.NewText) { NewStartMs = dto.StartMs, NewEndMs = dto.EndMs });
                     break;
                 case "edit":
-                    invalid = ErrorObject(StatusCodes.Status400BadRequest, "InvalidEdit", at + "an edit needs cueIndex (1 or more), oldText and newText.");
+                    invalid = ErrorObject(StatusCodes.Status400BadRequest, "InvalidEdit", at + "an edit needs cueIndex (1 or more), oldText and newText (and startMs with endMs to change its times).");
                     return null;
                 case "add" when dto.ClientId is not null && dto.StartMs.HasValue && dto.EndMs.HasValue && dto.Text is not null:
                     edits.Add(new SubtitleAddCue(dto.ClientId, dto.StartMs.Value, dto.EndMs.Value, dto.Text));

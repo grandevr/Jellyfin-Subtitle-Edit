@@ -3,7 +3,8 @@ using System.Text.Json.Serialization;
 namespace Jellyfin.Plugin.SubtitleQuickEdit.Api.Models;
 
 /// <summary>
-/// One change in a submission: <c>type</c> is <c>edit</c> (a line's new text) or <c>add</c> (a new line).
+/// One change in a submission: <c>type</c> is <c>edit</c> (a line's new text, and new times when <c>startMs</c> is
+/// set) or <c>add</c> (a new line).
 /// </summary>
 public class SubmittedEditDto
 {
@@ -26,6 +27,12 @@ public class SubmittedEditDto
     public long? CueStart { get; set; }
 
     /// <summary>
+    /// Gets or sets, for <c>edit</c>, the line's end time in milliseconds (null for submissions made before 1.3).
+    /// </summary>
+    [JsonPropertyName("cueEnd")]
+    public long? CueEnd { get; set; }
+
+    /// <summary>
     /// Gets or sets, for <c>edit</c>, the line's text when it was submitted.
     /// </summary>
     [JsonPropertyName("oldText")]
@@ -44,13 +51,15 @@ public class SubmittedEditDto
     public string? ClientId { get; set; }
 
     /// <summary>
-    /// Gets or sets, for <c>add</c>, the start time in milliseconds.
+    /// Gets or sets, for <c>add</c>, the start time in milliseconds; for <c>edit</c>, the proposed start time, or null
+    /// when the times stay.
     /// </summary>
     [JsonPropertyName("startMs")]
     public long? StartMs { get; set; }
 
     /// <summary>
-    /// Gets or sets, for <c>add</c>, the end time in milliseconds.
+    /// Gets or sets, for <c>add</c>, the end time in milliseconds; for <c>edit</c>, the proposed end time, or null when
+    /// the times stay.
     /// </summary>
     [JsonPropertyName("endMs")]
     public long? EndMs { get; set; }

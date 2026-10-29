@@ -20,7 +20,8 @@ window.subs = [
   { id: 'a1', userName: 'testuser', itemId: 'i1', itemName: 'Show S01E01 Pilot', streamIndex: 2, streamLabel: 'eng', created: '2026-10-25T01:00:00Z',
     state: 'Pending', note: '<img src=x onerror="window.pwned=1">', edits: [edit(1, 'One', 'One fixed'), edit(2, 'Two', 'Two fixed')] },
   { id: 'b2', userName: 'other', itemId: 'i2', itemName: 'Movie', streamIndex: 3, created: '2026-10-25T00:00:00Z', state: 'Pending',
-    edits: [{ type: 'add', clientId: 'c', startMs: 5000, endMs: 6000, text: 'New line', outcome: 'Pending' }] },
+    edits: [{ type: 'add', clientId: 'c', startMs: 5000, endMs: 6000, text: 'New line', outcome: 'Pending' },
+      { type: 'edit', cueIndex: 9, cueStart: 1467870, cueEnd: 2935717, oldText: 'No.', newText: 'No.', startMs: 1467870, endMs: 1468400, outcome: 'Pending' }] },
   { id: 'c3', userName: 'testuser', itemId: 'i1', itemName: 'Show S01E01 Pilot', streamIndex: 2, created: '2026-10-24T00:00:00Z', state: 'Pending',
     edits: [edit(4, 'Four', 'Four fixed')] },
 ];
@@ -95,6 +96,9 @@ const html = '<html><head><meta charset="utf-8"></head><body><script>' + mock + 
     (await p.$eval('[data-submission-id="a1"]', (e) => e.textContent)).indexOf('Show S01E01 Pilot · eng') >= 0 &&
     (await p.$eval('[data-submission-id="a1"]', (e) => e.textContent)).indexOf('testuser') >= 0 &&
     (await p.$$('[data-submission-id="a1"] .sqe-pick')).length === 2;
+  checks['a change of times shows the old and new times, and no text when the text stays'] =
+    (await p.$$eval('[data-submission-id="b2"] .sqe-sub-change', (e) => e[1].textContent)) ===
+    'Line 9 · 00:24:27,870Times 00:24:27,870 → 00:48:55,717Times 00:24:27,870 → 00:24:28,400';
   await p.click('[data-submission-id="a1"] .sqe-pick[data-index="1"]');
   await p.click('[data-submission-id="a1"] .sqe-approve');
   await p.waitForSelector('[data-submission-id="a1"] .sqe-sub-result:not([hidden])');

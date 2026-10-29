@@ -82,6 +82,7 @@ internal static class VttParser
             int blockStart = idLine >= 0 ? idLine : timeLine;
             bool precededByBlank = blockStart > 0 && IsBlank(decoded, lines[blockStart - 1]);
             TextLine time = lines[timeLine];
+            Match times = VttPatterns.TimingLine().Match(text, time.Start, time.End - time.Start);
             bool timeTerminated = time.TermEnd > time.End;
             bool textEmpty = end == timeLine + 1;
             int textStart;
@@ -115,7 +116,9 @@ internal static class VttParser
                     TextEnd: textEnd,
                     TextEmpty: textEmpty,
                     TimeLineTerminated: timeTerminated,
-                    PrecededByBlankLine: precededByBlank),
+                    PrecededByBlankLine: precededByBlank,
+                    TimesStart: times.Groups[1].Success ? times.Groups[1].Index : times.Groups[2].Index,
+                    TimesEnd: times.Groups[8].Index + times.Groups[8].Length),
             });
             lastContentLine = end - 1;
             index = end;

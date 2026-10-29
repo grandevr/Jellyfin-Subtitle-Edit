@@ -4,8 +4,11 @@ Jellyfin shows versions with four numbers; the plugin's folder is named after it
 Release workflow copies the section of the version it releases (rename "Unreleased" to the version when bumping it) into `manifest.json`, so Jellyfin shows it as the
 version's changelog.
 
-## Unreleased
+## 1.3.0.0
 
+- Change the times of an existing line: the pencil next to a line's times opens the Add line form for that line. Works
+  for SRT, WebVTT and ASS/SSA; only the two times change, everything else on the line stays. Users who submit changes
+  for review can suggest new times too.
 - With "Original + last N saves", many saves of one subtitle within the same millisecond, or after the server clock
   went back, could prune the newest backup instead of an older one.
 

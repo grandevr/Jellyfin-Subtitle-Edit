@@ -1,8 +1,8 @@
 namespace SubtitleQuickEdit.Core.Submissions;
 
 /// <summary>
-/// One edit of a submission, as stored. Text edits carry the line's position, start time and text as the user saw
-/// them, so the edit can be found again if the file changes before an admin approves it.
+/// One edit of a submission, as stored. Text edits (which may also change the line's times) carry the line's position,
+/// times and text as the user saw them, so the edit can be found again if the file changes before an admin approves it.
 /// </summary>
 public sealed record SubmittedEdit
 {
@@ -20,6 +20,22 @@ public sealed record SubmittedEdit
     /// Gets the start time of the edited line when it was submitted, in milliseconds (text edits).
     /// </summary>
     public long? CueStartMs { get; init; }
+
+    /// <summary>
+    /// Gets the end time of the edited line when it was submitted, in milliseconds (text edits; null in submissions
+    /// made before 1.3).
+    /// </summary>
+    public long? CueEndMs { get; init; }
+
+    /// <summary>
+    /// Gets the proposed start time of the edited line, or null when its times stay (text edits).
+    /// </summary>
+    public long? NewStartMs { get; init; }
+
+    /// <summary>
+    /// Gets the proposed end time of the edited line, or null when its times stay (text edits).
+    /// </summary>
+    public long? NewEndMs { get; init; }
 
     /// <summary>
     /// Gets the line's text when it was submitted (text edits). Line breaks are <c>\n</c>.

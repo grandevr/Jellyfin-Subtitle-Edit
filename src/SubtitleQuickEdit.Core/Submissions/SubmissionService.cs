@@ -246,6 +246,9 @@ public sealed class SubmissionService
             Kind = SubmittedEditKind.Edit,
             CuePosition = text.CuePosition,
             CueStartMs = doc.Cues[text.CuePosition - 1].StartMs,
+            CueEndMs = doc.Cues[text.CuePosition - 1].EndMs,
+            NewStartMs = text.NewStartMs,
+            NewEndMs = text.NewEndMs,
             OldText = doc.Cues[text.CuePosition - 1].Text,
             NewText = SubtitleText.NormalizeBreaks(text.NewText),
         },
@@ -270,19 +273,26 @@ public sealed class SubmissionService
 
         string oldText = edit.OldText ?? string.Empty;
         int? position = unchanged ? edit.CuePosition : FindLine(doc, edit, oldText);
-        return position is int p ? new SubtitleTextEdit(p, oldText, edit.NewText ?? string.Empty) : null;
+        return position is int p
+            ? new SubtitleTextEdit(p, oldText, edit.NewText ?? string.Empty) { NewStartMs = edit.NewStartMs, NewEndMs = edit.NewEndMs }
+            : null;
     }
 
     private static int? FindLine(ISubtitleDocument doc, SubmittedEdit edit, string oldText)
     {
+        // New times replace the line's times, so the line must still have the times the user saw.
+        bool retimed = edit.NewStartMs.HasValue && edit.CueEndMs.HasValue;
+        bool Same(SubtitleCue c) => string.Equals(c.Text, oldText, StringComparison.Ordinal)
+            && (!retimed || (c.StartMs == edit.CueStartMs && c.EndMs == edit.CueEndMs));
+
         int p = edit.CuePosition ?? 0;
-        if (p >= 1 && p <= doc.Cues.Count && string.Equals(doc.Cues[p - 1].Text, oldText, StringComparison.Ordinal))
+        if (p >= 1 && p <= doc.Cues.Count && Same(doc.Cues[p - 1]))
         {
             return p;
         }
 
         List<SubtitleCue> same = doc.Cues
-            .Where(c => c.StartMs == edit.CueStartMs && string.Equals(c.Text, oldText, StringComparison.Ordinal))
+            .Where(c => c.StartMs == edit.CueStartMs && Same(c))
             .ToList();
         return same.Count == 1 ? same[0].Position : null;
     }

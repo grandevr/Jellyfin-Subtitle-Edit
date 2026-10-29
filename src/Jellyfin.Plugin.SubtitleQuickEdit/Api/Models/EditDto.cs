@@ -3,7 +3,8 @@ using System.Text.Json.Serialization;
 namespace Jellyfin.Plugin.SubtitleQuickEdit.Api.Models;
 
 /// <summary>
-/// One edit in a save request: <c>type</c> is <c>edit</c> (replace a cue's text) or <c>add</c> (a new cue).
+/// One edit in a save request: <c>type</c> is <c>edit</c> (replace a cue's text, and its times when <c>startMs</c> and
+/// <c>endMs</c> are given) or <c>add</c> (a new cue).
 /// </summary>
 public class EditDto
 {
@@ -38,13 +39,15 @@ public class EditDto
     public string? ClientId { get; set; }
 
     /// <summary>
-    /// Gets or sets, for <c>add</c>, the start time in milliseconds.
+    /// Gets or sets, for <c>add</c>, the start time in milliseconds; for <c>edit</c>, the new start time, or null to
+    /// keep the cue's times.
     /// </summary>
     [JsonPropertyName("startMs")]
     public long? StartMs { get; set; }
 
     /// <summary>
-    /// Gets or sets, for <c>add</c>, the end time in milliseconds.
+    /// Gets or sets, for <c>add</c>, the end time in milliseconds; for <c>edit</c>, the new end time, or null to keep the
+    /// cue's times.
     /// </summary>
     [JsonPropertyName("endMs")]
     public long? EndMs { get; set; }
