@@ -657,6 +657,32 @@
         }
 
         /**
+         * The request that starts a new subtitle track with every staged new line, or null when none is staged:
+         * { request, rowIds } where request is the body of POST .../Subtitles/New. A new track has no cues, so there
+         * are no edit rows and no hash to save against.
+         */
+        prepareNewTrack(language) {
+            const staged = this.rows.filter(function (r) {
+                return r.status === 'staged' && r.type === 'add';
+            });
+            if (staged.length === 0) {
+                return null;
+            }
+
+            return {
+                request: {
+                    language: language || null,
+                    edits: staged.map(function (r) {
+                        return { type: 'add', clientId: r.clientId, startMs: r.startMs, endMs: r.endMs, text: r.text };
+                    }),
+                },
+                rowIds: staged.map(function (r) {
+                    return r.rowId;
+                }),
+            };
+        }
+
+        /**
          * Applies a successful save. The rows that were sent become 'saved'; each new line takes its cue number from
          * the response's addedCues mapping (clientId to number), and every edit row's cue number shifts for the lines
          * that were inserted before it. The response's hash becomes the new base hash.
@@ -882,6 +908,15 @@
         }
 
         return me.canSubmit === true ? 'submit' : null;
+    }
+
+    /**
+     * Whether the player gets the edit button. Users who save directly always get it, so they can start a new track
+     * when no editable subtitle is on (and it shows as soon as the player's controls do); users who submit for review
+     * get it only on a subtitle they can work on.
+     */
+    function showsEditButton(mode, hasTarget) {
+        return mode === 'edit' || (mode === 'submit' && Boolean(hasTarget));
     }
 
     const SUBMISSION_STATES = {
@@ -1215,6 +1250,7 @@
         locateCue: locateCue,
         StagingModel: StagingModel,
         editorMode: editorMode,
+        showsEditButton: showsEditButton,
         submissionStateLabel: submissionStateLabel,
         submissionsFor: submissionsFor,
         draftKey: draftKey,

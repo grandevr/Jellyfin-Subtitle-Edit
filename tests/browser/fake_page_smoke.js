@@ -24,6 +24,11 @@ function showJassub() {
 const ROLE = (location.search.match(/role=(\\w+)/) || [])[1] || 'admin'; // admin, submitter or none
 const EMBEDDED = location.search.indexOf('embedded=1') >= 0; // the track is inside the video: the panel offers a copy
 const EXISTING = location.search.indexOf('existing=1') >= 0; // ...and a file of the copy's name is already there
+const NOSUB = location.search.indexOf('nosub=1') >= 0; // playback starts with subtitles off
+const SLOW = location.search.indexOf('slow=1') >= 0; // Sessions shows the item only 3 s after the page started
+const TAKEN = location.search.indexOf('taken=1') >= 0; // a new track's file name is already taken (by track 0)
+const STARTED = Date.now();
+window.fakeNewSent = [];
 window.fakeParams = {};
 window.fakeExtractSent = [];
 window.fakeSubs = [];
@@ -67,7 +72,13 @@ setTimeout(() => {
   document.addEventListener('keydown', (e) => window.jfKeys.push(e.key)); // jellyfin-web's own listener, added later
   window.addEventListener('keydown', (e) => window.jfKeys.push('w:' + e.key), true);
   const R = {
-    'Sessions': () => [{ Id: 's1', NowPlayingItem: { Id: 'abc', RunTimeTicks: 600000000 }, PlayState: { MediaSourceId: 'abc', SubtitleStreamIndex: 0 } }],
+    'Sessions': () => SLOW && Date.now() - STARTED < 3000 ? [{ Id: 's1' }]
+      : [{ Id: 's1', NowPlayingItem: { Id: 'abc', RunTimeTicks: 600000000 }, PlayState: { MediaSourceId: 'abc', SubtitleStreamIndex: NOSUB ? -1 : 0 } }],
+    'SubtitleQuickEdit/Items/abc/Subtitles/New': () => {
+      const asked = String((window.fakeParams['SubtitleQuickEdit/Items/abc/Subtitles/New'] || {}).language || '').toLowerCase();
+      const code = { eng: 'en', pol: 'pl' }[asked] || asked || null;
+      return { fileName: 'Ep' + (code ? '.' + code : '') + '.srt', language: code, exists: TAKEN, existingStreamIndex: TAKEN ? 0 : undefined };
+    },
     'SubtitleQuickEdit/Items/abc/Subtitles': () => EMBEDDED
       ? [{ streamIndex: 0, external: false, format: 'subrip', editable: false, extractable: true, reason: 'Embedded subtitle tracks cannot be edited.' }]
         .concat(window.fakePlaying ? [{ streamIndex: 3, external: true, format: 'srt', editable: true, extractable: false }] : [])
@@ -84,7 +95,7 @@ setTimeout(() => {
       : { isAdmin: false, canEdit: false, canSubmit: ROLE === 'submitter', submissionsOn: true, maxNoteLength: 500 },
     'SubtitleQuickEdit/Submissions/Mine': () => window.fakeSubs,
   };
-  window.ApiClient = { getCurrentUserId: () => 'u1', getCurrentUser: () => Promise.resolve({ Policy: { IsAdministrator: true } }),
+  window.ApiClient = { getCurrentUserId: () => 'u1', getCurrentUser: () => Promise.resolve({ Policy: { IsAdministrator: true }, Configuration: { SubtitleLanguagePreference: 'pol' } }),
     isLoggedIn: () => true, accessToken: () => 't', deviceId: () => 'd', getUrl: (p, q) => { if (q) { window.fakeParams[p] = q; } return p; },
     getJSON: (u) => R[u] ? Promise.resolve(copy(R[u]())) : Promise.reject(new Error('no ' + u)),
     ajax: (o) => {
@@ -109,6 +120,12 @@ setTimeout(() => {
         window.fakeExtractSent.push(body);
         if (EXISTING && !body.replace) { return refused(409, { code: 'FileExists', message: 'exists', currentHash: 'e1' }); }
         return Promise.resolve({ fileName: 'Ep.en.srt', hash: 'x1', replaced: Boolean(body.replace), streamIndex: 3, refreshPending: false });
+      }
+      if (o.url === 'SubtitleQuickEdit/Items/abc/Subtitles/New') {
+        window.fakeNewSent.push(body);
+        const added = {};
+        body.edits.slice().sort((x, y) => x.startMs - y.startMs).forEach((e, i) => { added[e.clientId] = i + 1; });
+        return Promise.resolve({ fileName: 'Ep' + (body.language ? '.' + body.language : '') + '.srt', hash: 'n1', addedCues: added, streamIndex: 5, refreshPending: false });
       }
       if (o.url === 'Sessions/s1/Playing') {
         window.fakePlaying = window.fakeParams['Sessions/s1/Playing'];
@@ -163,7 +180,7 @@ setTimeout(() => {
   Object.defineProperty(v, 'currentTime', { get: () => time, set: (x) => { time = x; v.dispatchEvent(new Event('seeked')); v.dispatchEvent(new Event('timeupdate')); } });
   v.addEventListener('timeupdate', renderCustom); // jellyfin-web's own handler, registered before the editor sees the video
   if (JASSUB) { const track = v.addTextTrack('subtitles', 'manualTrack', 'und'); track.mode = 'disabled'; showJassub(); }
-  else if (CUSTOM) { showCustom(); } else { const track = v.addTextTrack('subtitles', 'manualTrack', 'und'); track.mode = 'showing'; fillTrack(track); }
+  else if (CUSTOM) { showCustom(); } else { const track = v.addTextTrack('subtitles', 'manualTrack', 'und'); track.mode = NOSUB ? 'disabled' : 'showing'; if (!NOSUB) { fillTrack(track); } }
   document.body.insertAdjacentHTML('beforeend', '<div class="videoOsdBottom"><div class="osdControls"><div class="buttons"><button class="btnSubtitles">CC</button><button class="btnFullscreen">F</button></div></div></div>');
 }, 800);`;
 const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><body><script>${script}</script><script>${fake}</script></body></html>`;
@@ -389,12 +406,15 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   await p.keyboard.press('Escape');
   checks['Esc closed the panel'] = !(await p.$('.sqe-panel'));
   // Subtitles off and on again by the player itself (no menu click, no DOM change): the button follows the text track.
-  const setMode = (m) => p.evaluate((mode) => { Array.from(document.querySelector('video').textTracks).find((t) => t.label === 'manualTrack').mode = mode; }, m);
-  await setMode('disabled');
-  const goneOff = await p.waitForFunction(() => !document.querySelector('.sqe-edit-button'), null, { timeout: 3000 }).then(() => true, () => false);
-  await setMode('showing');
-  const backOn = await p.waitForSelector('.sqe-edit-button', { timeout: 3000 }).then(() => true, () => false);
-  checks['the button goes when the text track is switched off and comes back when it is shown again'] = goneOff && backOn;
+  // An admin keeps the button with subtitles off (to start a new track); its label says so.
+  const setMode = (page, m) => page.evaluate((mode) => { Array.from(document.querySelector('video').textTracks).find((t) => t.label === 'manualTrack').mode = mode; }, m);
+  const labelIs = (page, label) => page.waitForFunction((l) => { const x = document.querySelector('.sqe-edit-button'); return x && x.title === l; }, label, { timeout: 3000 })
+    .then(() => true, () => false);
+  await setMode(p, 'disabled');
+  const offLabel = await labelIs(p, 'Edit subtitles or start a new track');
+  await setMode(p, 'showing');
+  checks['admin: with the text track off the button stays and offers a new track, and edits the track again when it is back'] =
+    offLabel && await labelIs(p, 'Edit subtitle line') && (await p.$$('.sqe-edit-button')).length === 1;
   // The custom subtitle renderer (a jellyfin-web user setting): no text track, jellyfin-web's own element instead.
   const q = await b.newPage();
   await q.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
@@ -483,6 +503,12 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   await r.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('The file changed') === 0, null, { timeout: 5000 });
   checks['submitter: a file changed on disk submits nothing and keeps the matching change staged'] =
     (await r.evaluate(() => window.fakeSubs.length)) === 1 && (await r.$$eval(".sqe-change .sqe-badge", (e) => e.map((x) => x.textContent))).join() === "staged";
+  await r.keyboard.press('Escape');
+  await setMode(r, 'disabled');
+  const goneOff = await r.waitForFunction(() => !document.querySelector('.sqe-edit-button'), null, { timeout: 3000 }).then(() => true, () => false);
+  await setMode(r, 'showing');
+  const backOn = await r.waitForSelector('.sqe-edit-button', { timeout: 3000 }).then(() => true, () => false);
+  checks['submitter: the button goes when the text track is switched off and comes back when it is shown again'] = goneOff && backOn;
   await r.close();
   const n = await b.newPage();
   await n.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
@@ -620,6 +646,92 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
     JSON.stringify(await e3.evaluate(() => window.fakeExtractSent)) === '[{"replace":true,"expectedExistingHash":"e1"}]' &&
     Boolean(await e3.evaluate(() => window.fakePlaying));
   await e3.close();
+
+  // A new subtitle track: subtitles off, and Sessions slow to show the item.
+  const t = await b.newPage();
+  await t.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  t.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+  t.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
+  t.on('dialog', (d) => d.accept());
+  const loaded = Date.now();
+  await t.goto(ORIGIN + '/web/index.html?nosub=1&slow=1');
+  await t.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  const shownAfter = Date.now() - loaded;
+  checks['new track: with subtitles off the button shows before Sessions knows the item'] = shownAfter < 2500 &&
+    (await t.evaluate(() => window.SubtitleQuickEdit.debugState().session)) === null &&
+    (await t.getAttribute('.sqe-edit-button', 'title')) === 'Edit subtitles or start a new track';
+  info.newTrackButtonMs = shownAfter;
+  await t.click('.sqe-edit-button');
+  checks['new track: pressed early, the panel says Loading'] = (await t.$eval('.sqe-status', (e) => e.textContent)) === 'Loading…';
+  await t.waitForFunction(() => /Ep\.pl\.srt/.test((document.querySelector('.sqe-extract-what') || {}).textContent || ''), null, { timeout: 8000 });
+  checks['new track: the panel offers a new track in the user\'s subtitle language, and the file name'] =
+    (await t.$eval('.sqe-title', (e) => e.textContent)) === 'New subtitle track' &&
+    (await t.$eval('.sqe-status', (e) => e.textContent)).indexOf('No subtitle is on.') === 0 &&
+    (await t.inputValue('.sqe-new-language')) === 'pl' &&
+    (await t.$eval('.sqe-extract-what', (e) => e.textContent)) === 'The new file will be \u201cEp.pl.srt\u201d.' &&
+    !(await t.$eval('.sqe-start-new', (e) => e.disabled)) && await t.$eval('.sqe-actions', (e) => e.hidden);
+  await t.waitForSelector('.sqe-switch-track', { timeout: 3000 }).catch(() => null);
+  checks['new track: the subtitle that can be edited is offered too'] = (await t.$$('.sqe-switch-track')).length === 1;
+  await t.keyboard.press('Control+s');
+  checks['new track: Ctrl+S in the choice makes nothing'] = (await t.evaluate(() => window.fakeNewSent.length)) === 0;
+  await t.selectOption('.sqe-new-language', 'en');
+  await t.waitForFunction(() => document.querySelector('.sqe-extract-what').textContent.indexOf('Ep.en.srt') >= 0, null, { timeout: 3000 });
+  await t.selectOption('.sqe-new-language', '');
+  await t.waitForFunction(() => document.querySelector('.sqe-extract-what').textContent === 'The new file will be \u201cEp.srt\u201d.', null, { timeout: 3000 })
+    .catch(() => null);
+  checks['new track: another language, or none, changes the file name'] =
+    (await t.$eval('.sqe-extract-what', (e) => e.textContent)) === 'The new file will be \u201cEp.srt\u201d.';
+  await t.selectOption('.sqe-new-language', 'en');
+  await t.waitForFunction(() => document.querySelector('.sqe-extract-what').textContent.indexOf('Ep.en.srt') >= 0, null, { timeout: 3000 });
+  await t.click('.sqe-start-new');
+  checks['new track: Start opens an empty editor with + Add line, no Reload or Revert, Save off'] =
+    (await t.$eval('.sqe-status', (e) => e.textContent)).indexOf('\u201cEp.en.srt\u201d') > 0 &&
+    !(await t.$eval('.sqe-add', (e) => e.disabled)) && !(await t.$eval('.sqe-actions', (e) => e.hidden)) &&
+    (await t.$eval('.sqe-reload', (e) => e.hidden)) && (await t.$eval('.sqe-revert', (e) => e.hidden)) &&
+    (await t.$eval('.sqe-save', (e) => e.disabled)) && (await t.$$('.sqe-cue-text')).length === 0;
+  await t.click('.sqe-add');
+  await t.fill('.sqe-new-text', 'The first line');
+  await t.keyboard.press('Control+Enter');
+  checks['new track: a staged line is listed, and the note says Save makes the file'] = (await t.$$('.sqe-change')).length === 1 &&
+    (await t.$eval('.sqe-status', (e) => e.textContent)).indexOf('Save writes the new subtitle file') > 0 &&
+    !(await t.$eval('.sqe-save', (e) => e.disabled));
+  await t.reload();
+  await t.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  await t.click('.sqe-edit-button');
+  await t.waitForSelector('.sqe-start-new:not([disabled])', { timeout: 8000 });
+  await t.click('.sqe-start-new');
+  checks['new track: the staged line survives a page reload'] = (await t.$$('.sqe-change')).length === 1 &&
+    (await t.$eval('.sqe-status', (e) => e.textContent)).indexOf('Restored 1') === 0;
+  await t.keyboard.press('Control+s');
+  await t.waitForFunction(() => window.fakePlaying, null, { timeout: 5000 }).catch(() => null);
+  const made = await t.evaluate(() => ({ sent: window.fakeNewSent, playing: window.fakePlaying }));
+  checks['new track: Save sends the language and the line in one request'] = made.sent.length === 1 && made.sent[0].language === 'pl' &&
+    made.sent[0].edits.length === 1 && made.sent[0].edits[0].type === 'add' && made.sent[0].edits[0].text === 'The first line' &&
+    made.sent[0].baseHash === undefined;
+  checks['new track: then playback restarts on the new track'] = Boolean(made.playing) && made.playing.subtitleStreamIndex === 5;
+  await t.waitForSelector('.sqe-toast', { timeout: 3000 }).catch(() => null);
+  checks['new track: a message says the file was made'] =
+    ((await t.$eval('.sqe-toast', (x) => x.textContent).catch(() => '')) || '').indexOf('Made \u201cEp.pl.srt\u201d with 1 line.') === 0;
+  checks['new track: the draft is gone'] = (await t.evaluate(() => Object.keys(localStorage).filter((k) => k.indexOf('sqe:') === 0).length)) === 0;
+  await t.close();
+
+  const u = await b.newPage();
+  await u.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  u.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+  await u.goto(ORIGIN + '/web/index.html?nosub=1&taken=1');
+  await u.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  await u.click('.sqe-edit-button');
+  await u.waitForFunction(() => /already/.test((document.querySelector('.sqe-extract-what') || {}).textContent || ''), null, { timeout: 8000 });
+  checks['new track, name taken: no Start, a switch to that file'] = (await u.$eval('.sqe-start-new', (e) => e.disabled)) &&
+    !(await u.$eval('.sqe-switch-existing', (e) => e.hidden));
+  await u.close();
+
+  const v = await b.newPage();
+  await v.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  await v.goto(ORIGIN + '/web/index.html?nosub=1&role=submitter');
+  await v.waitForTimeout(2500);
+  checks['new track: a submitter gets no button with subtitles off'] = !(await v.$('.sqe-edit-button'));
+  await v.close();
 
   checks['no errors in the console'] = logs.every((l) => !/^(error|pageerror)/.test(l));
 

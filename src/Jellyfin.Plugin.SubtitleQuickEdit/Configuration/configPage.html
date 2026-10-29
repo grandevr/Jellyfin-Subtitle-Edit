@@ -86,10 +86,10 @@
 
                 <div id="SqeExtracted">
                     <div class="sqe-review-head">
-                        <h2 id="SqeExtractedTitle">Editable copies</h2>
+                        <h2 id="SqeExtractedTitle">Subtitle files made in the editor</h2>
                     </div>
-                    <p class="fieldDescription">Subtitle files made from subtitle tracks inside a video, so they could be edited. The track inside the video is never changed. Deleting a copy keeps its last content in the backups.</p>
-                    <p id="SqeExtractedEmpty" class="fieldDescription" hidden>No editable copies have been made.</p>
+                    <p class="fieldDescription">Editable copies of subtitle tracks inside a video, and new subtitle tracks started from scratch. The video and the tracks inside it are never changed. Deleting a file keeps its last content in the backups.</p>
+                    <p id="SqeExtractedEmpty" class="fieldDescription" hidden>No subtitle files have been made in the editor.</p>
                     <div id="SqeExtractedList"></div>
                 </div>
             </div>
@@ -412,12 +412,13 @@
                     title.appendChild(document.createTextNode(' · ' + file.fileName));
                     box.appendChild(title);
                     var state = !file.exists ? 'the file is gone' : file.edited ? 'edited since' : 'not edited since';
+                    var kind = file.sourceStreamIndex < 0 ? ' · a new track' : ' · a copy of a track inside the video';
                     box.appendChild(el('p', 'sqe-sub-meta', (file.userName || 'A user') + ' · ' + (file.created ? new Date(file.created).toLocaleString() : '') +
-                        ' · ' + state + (file.replaced ? ' · replaced the file that was there (kept in the backups)' : '')));
+                        ' · ' + state + kind + (file.replaced ? ' · replaced the file that was there (kept in the backups)' : '')));
                     var result = el('p', 'sqe-sub-result');
                     result.hidden = true;
                     var actions = el('div', 'sqe-sub-actions');
-                    var del = el('button', 'raised emby-button sqe-delete-copy', 'Delete copy');
+                    var del = el('button', 'raised emby-button sqe-delete-copy', 'Delete file');
                     del.type = 'button';
                     del.addEventListener('click', function () {
                         if (del.getAttribute('data-confirm') !== '1') {

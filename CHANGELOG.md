@@ -6,6 +6,10 @@ version's changelog.
 
 ## Unreleased
 
+- Start a new subtitle track from scratch: for users who may save directly, the edit button is always in the player,
+  also with subtitles off, and shows as soon as the player's controls do. With no editable subtitle on, the panel
+  offers a new track (with a language for its name); the first Save writes `{video}[.{language}].srt` next to the video
+  and restarts playback on it. Admins see these files with the editable copies in the settings page.
 - With "Original + last N saves", many saves of one subtitle within the same millisecond, or after the server clock
   went back, could prune the newest backup instead of an older one.
 
