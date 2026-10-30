@@ -25,8 +25,8 @@ ASCII counts as UTF-8 (as in Jellyfin). A legacy code page file whose encoding t
 not editable rather than guessed. Random text is not detectable; natural text (Polish, Czech) is.
 A character that the file's encoding cannot hold is refused with a message naming the encoding.
 
-**Editing** works on bytes: only the edited cue's text bytes, the added blocks and (when something is added) the
-number lines change. Every other byte, including BOM, line endings, spacing and the file's ending style, is kept.
+**Editing** works on bytes: only the edited cue's text bytes (and times, when they change), the added blocks and (when
+something is added) the number lines change. Every other byte, including BOM, line endings, spacing and the file's ending style, is kept.
 Loading and saving with no edits, or replacing a cue with its own text, is byte-identical.
 - Cues are addressed by their 1-based position, not their number line.
 - New text uses the file's dominant line ending. Text must not be empty, contain a blank (or whitespace-only) line,
@@ -36,6 +36,10 @@ Loading and saving with no edits, or replacing a cue with its own text, is byte-
   line for cues that had none. The file's ending style (0, 1 or 2 final line breaks) is kept.
 - Added cues: start at least 0, end after start, at least 100 ms long, at most 99:59:59,999, and not after the item's
   runtime when it is given.
+- New times for an existing cue (1.3) follow the same rules. Only the two times on its time line are rewritten (in the
+  canonical `hh:mm:ss,mmm` form; SRT coordinates and WebVTT cue settings after them stay; for ASS only the Start and End
+  fields, rounded to centiseconds). The cue is not moved, even when its new start is after the next cue's: positions
+  stay what the client knows, and players show lines by their times, not their order in the file.
 - After building the new bytes the result is parsed again and compared with what was intended (cue count, times, texts,
   encoding, numbering). A mismatch refuses the save. One case this catches: in a gap-less file whose next cue has no
   number line, new text ending in a bare number would be read as that cue's number.

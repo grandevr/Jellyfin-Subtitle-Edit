@@ -31,10 +31,10 @@ and stored as a pending submission in `data/SubtitleQuickEdit/submissions/{id}.j
 file is not touched, and Jellyfin's activity log gets an entry so admins notice. A submission answers with `id`,
 `userId`, `userName`, `itemId`, `itemName`, `streamIndex`, `streamLabel`, `baseHash`, `note`, `created`, `state`
 (`Pending`, `Approved`, `PartlyApproved`, `Rejected`, `Withdrawn`), `decided`, `decidedBy`, `reason` and `edits` (each
-with `type`, the edit's fields, `cueStart` and `outcome`: `Pending`, `Applied`, `Conflict`, `NotChosen`, plus a
+with `type`, the edit's fields, `cueStart`, `cueEnd` (from 1.3) and `outcome`: `Pending`, `Applied`, `Conflict`, `NotChosen`, plus a
 `message` for a conflict). Approve body: `{ "edits"?: [0-based indexes] }` (all when left out). When the file changed
 since the submission, each edited line is looked for again (same position and text, else the one line with the same
-start and text); changes not found are conflicts and are not written. If no chosen change can be written, nothing is
+start and text; a change of times also needs the line to still have the times it was submitted against); changes not found are conflicts and are not written. If no chosen change can be written, nothing is
 written, `applied` is false and the submission stays pending with its conflicts marked. Reject body: `{ "reason"? }`.
 The newest 50 decided submissions are kept; pending ones are never deleted. Extra codes: 404 `SubmissionNotFound`;
 409 `NotPending` / `SubmissionsOff`; 400 `TextTooLong` / `InvalidChoice`; 429 `TooManyPending`; 500 `StorageFailed`.
@@ -50,7 +50,12 @@ kept as `…_replaced.srt` in the backups. Each extraction is recorded in `data/
 admin gets an activity log entry for each extraction. Extra codes: 400 `AlreadyExternal` / `NotExtractable` (picture
 track, not a local video); 413 `TooLarge`; 422 `NotEditable`; 404 `ExtractedNotFound`; 500 `ExtractFailed`.
 
-Edits body: `{ "baseHash", "edits": [ {"type":"edit","cueIndex","oldText","newText"} | {"type":"add","clientId","startMs","endMs","text"} ], "keepRestorePoint"? }`.
+Edits body: `{ "baseHash", "edits": [ {"type":"edit","cueIndex","oldText","newText","startMs"?,"endMs"?} | {"type":"add","clientId","startMs","endMs","text"} ], "keepRestorePoint"? }`.
+An `edit` with `startMs` and `endMs` also gives the line new times (both or neither; send `oldText` as `newText` to change
+only the times). The times follow the rules for an added line (start at least 0, end after start, at least 100 ms, not
+after the end of the video, within what the format can hold; ASS rounds to centiseconds) and an error names the line by
+`cueIndex`. Only the two times change: the line keeps its place and number in the file, its SRT coordinates, WebVTT
+identifier and cue settings, and every other ASS field. ASS drawings cannot be retimed.
 With `keepRestorePoint` (the editor sends it on the first save of a browser session) the file as it was is also kept
 as a restore point (`…_restore.srt`, the newest 3 per file).
 

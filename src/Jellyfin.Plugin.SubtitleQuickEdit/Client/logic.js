@@ -18,7 +18,7 @@
     // ---- constants (mirror the server's rules) ----------------------------------------------------------------
 
     const MAX_TIME_MS = 359999999; // 99:59:59,999, the most an .srt time can hold
-    const MIN_CUE_MS = 100; // an added line must be at least this long
+    const MIN_CUE_MS = 100; // a line must be at least this long
     const DEFAULT_LENGTH_MS = 2000; // default length of a new line
     const MIN_DEFAULT_LENGTH_MS = 500; // the default end is never closer than this to the start
     const SESSIONS_LAG_MS = 10000; // how long GET /Sessions can take to show a subtitle change (6 s measured, with margin)
@@ -330,39 +330,46 @@
     }
 
     /**
-     * Checks an added line the way the server will: start at least 0, end after start, at least 100 ms long, end within
-     * 99:59:59,999 and within the runtime when it is known, and valid text for options.format. Returns { ok, errors:
-     * [{ field, message }] }.
+     * Checks a line's times the way the server will: start at least 0, end after start, at least 100 ms long, end within
+     * 99:59:59,999 and within runtimeMs when it is known. subject starts each message ('A new line', 'A line'). Returns
+     * the errors as [{ field, message }].
      */
-    function validateNewLine(line, options) {
+    function validateTimes(startMs, endMs, runtimeMs, subject) {
         const errors = [];
-        const runtimeMs = options && typeof options.runtimeMs === 'number' && isFinite(options.runtimeMs) ? options.runtimeMs : null;
-        const startMs = line ? line.startMs : null;
-        const endMs = line ? line.endMs : null;
+        const runtime = typeof runtimeMs === 'number' && isFinite(runtimeMs) ? runtimeMs : null;
         const startOk = typeof startMs === 'number' && isFinite(startMs);
         const endOk = typeof endMs === 'number' && isFinite(endMs);
         if (!startOk) {
             errors.push({ field: 'start', message: 'Enter a start time as hh:mm:ss,mmm.' });
         } else if (startMs < 0) {
-            errors.push({ field: 'start', message: 'A new line cannot start before 00:00:00,000.' });
+            errors.push({ field: 'start', message: subject + ' cannot start before 00:00:00,000.' });
         }
 
         if (!endOk) {
             errors.push({ field: 'end', message: 'Enter an end time as hh:mm:ss,mmm.' });
         } else if (endMs > MAX_TIME_MS) {
-            errors.push({ field: 'end', message: 'A new line cannot end after 99:59:59,999.' });
-        } else if (runtimeMs !== null && endMs > runtimeMs) {
-            errors.push({ field: 'end', message: 'A new line must not end after the end of the video.' });
+            errors.push({ field: 'end', message: subject + ' cannot end after 99:59:59,999.' });
+        } else if (runtime !== null && endMs > runtime) {
+            errors.push({ field: 'end', message: subject + ' must not end after the end of the video.' });
         }
 
         if (startOk && endOk) {
             if (endMs <= startMs) {
-                errors.push({ field: 'end', message: 'A new line must end after it starts.' });
+                errors.push({ field: 'end', message: subject + ' must end after it starts.' });
             } else if (endMs - startMs < MIN_CUE_MS) {
-                errors.push({ field: 'end', message: 'A new line must be at least 100 ms long.' });
+                errors.push({ field: 'end', message: subject + ' must be at least 100 ms long.' });
             }
         }
 
+        return errors;
+    }
+
+    /**
+     * Checks an added line the way the server will: its times (see validateTimes) and valid text for options.format.
+     * Returns { ok, errors: [{ field, message }] }.
+     */
+    function validateNewLine(line, options) {
+        const errors = validateTimes(line ? line.startMs : null, line ? line.endMs : null, options && options.runtimeMs, 'A new line');
         const text = validateCueText(line ? line.text : null, options && options.format);
         if (!text.ok) {
             errors.push({ field: 'text', message: text.error.message });
@@ -427,10 +434,25 @@
         return Object.assign({}, row);
     }
 
+    /** True when an edit row also changes its line's times (newStart and newEnd are set). */
+    function timesChanged(row) {
+        return Boolean(row) && row.type === 'edit' && typeof row.newStart === 'number' && typeof row.newEnd === 'number';
+    }
+
+    /**
+     * Like locateCue, but a row that changes the line's times also needs the line to still have the times it was
+     * staged against: otherwise the new times would undo someone else's change.
+     */
+    function locateStaged(row, freshCues) {
+        const found = locateCue(row, freshCues);
+        return found && timesChanged(row) && (found.start !== row.start || found.end !== row.end) ? null : found;
+    }
+
     /**
      * The changes of one editing session: one row per edited cue (editing a cue again updates its row), plus new lines.
      * Row status is 'staged', 'saved' or 'failed'. Edit rows: { rowId, type: 'edit', cueIndex, start, end, oldText,
-     * newText, status, message }. New-line rows: { rowId, type: 'add', clientId, position, startMs, endMs, text, status,
+     * newText, newStart, newEnd, status, message }; start and end are the line's times in the file, newStart and newEnd
+     * its new times, or null when they stay. New-line rows: { rowId, type: 'add', clientId, position, startMs, endMs, text, status,
      * message }. cueIndex and position are 1-based cue numbers as of the last known state of the file.
      */
     class StagingModel {
@@ -487,20 +509,39 @@
         }
 
         /**
-         * Stages new text for a cue. Editing a cue that already has an unsaved row updates that row (oldText stays the
-         * file's text); setting the text back to the original removes the row. Returns { ok, row } or { ok: false, error }.
+         * Stages new text for a cue, and new times when times ({ startMs, endMs }) is given; without times the row keeps
+         * the times it had staged. Editing a cue that already has an unsaved row updates that row (oldText stays the
+         * file's text); setting the text and times back to the original removes the row. Returns { ok, row } or
+         * { ok: false, error, errors: [{ field, message }] }.
          */
-        stageEdit(cue, newText) {
+        stageEdit(cue, newText, times) {
             const checked = validateCueText(newText, this.format);
             if (!checked.ok) {
-                return { ok: false, error: checked.error };
+                return { ok: false, error: checked.error, errors: [{ field: 'text', message: checked.error.message }] };
             }
 
             const existing = this.rows.find(function (r) {
                 return r.type === 'edit' && r.cueIndex === cue.index && r.status !== 'saved';
             });
+            let newStart = timesChanged(existing) ? existing.newStart : null;
+            let newEnd = timesChanged(existing) ? existing.newEnd : null;
+            if (times) {
+                const errors = validateTimes(times.startMs, times.endMs, this.runtimeMs, 'A line');
+                if (errors.length > 0) {
+                    return { ok: false, error: { message: errors[0].message }, errors: errors };
+                }
+
+                newStart = Math.round(times.startMs);
+                newEnd = Math.round(times.endMs);
+            }
+
+            if (newStart === cue.start && newEnd === cue.end) {
+                newStart = null;
+                newEnd = null;
+            }
+
             const original = existing ? existing.oldText : normalizeText(cue.text);
-            if (checked.text === original) {
+            if (checked.text === original && newStart === null) {
                 if (existing) {
                     this.rows.splice(this.rows.indexOf(existing), 1);
                 }
@@ -512,6 +553,8 @@
                 existing.newText = checked.text;
                 existing.start = cue.start;
                 existing.end = cue.end;
+                existing.newStart = newStart;
+                existing.newEnd = newEnd;
                 existing.status = 'staged';
                 existing.message = null;
                 return { ok: true, row: copyRow(existing) };
@@ -526,6 +569,8 @@
                 end: cue.end,
                 oldText: original,
                 newText: checked.text,
+                newStart: newStart,
+                newEnd: newEnd,
                 status: 'staged',
                 message: null,
             };
@@ -593,8 +638,9 @@
         }
 
         /**
-         * Stages the reverse of a saved edit: the line's text from before that save, to be written by the next Save.
-         * Refused when the line has changed in the file since. Returns stageEdit's answer, or { ok: false, error }.
+         * Stages the reverse of a saved edit: the line's text (and times) from before that save, to be written by the
+         * next Save. Refused when the line has changed in the file since. Returns stageEdit's answer, or
+         * { ok: false, error }.
          */
         undoSaved(rowId) {
             const row = this.findRow(rowId);
@@ -605,11 +651,12 @@
             const cue = this.cues.find(function (c) {
                 return c.index === row.cueIndex;
             });
-            if (!cue || normalizeText(cue.text) !== row.newText) {
+            const retimed = timesChanged(row);
+            if (!cue || normalizeText(cue.text) !== row.newText || (retimed && (cue.start !== row.newStart || cue.end !== row.newEnd))) {
                 return { ok: false, error: 'This line was changed again after that save, so it cannot be put back this way. Edit it by hand.' };
             }
 
-            return this.stageEdit(cue, row.oldText);
+            return this.stageEdit(cue, row.oldText, retimed ? { startMs: row.start, endMs: row.end } : undefined);
         }
 
         /** Staged new lines that overlap the span, for the overlap warning (existing cues are checked with findOverlaps). */
@@ -641,7 +688,13 @@
             }).sort(function (a, b) {
                 return a.cueIndex - b.cueIndex;
             }).map(function (r) {
-                return { type: 'edit', cueIndex: r.cueIndex, oldText: r.oldText, newText: r.newText };
+                const edit = { type: 'edit', cueIndex: r.cueIndex, oldText: r.oldText, newText: r.newText };
+                if (timesChanged(r)) {
+                    edit.startMs = r.newStart;
+                    edit.endMs = r.newEnd;
+                }
+
+                return edit;
             });
             const adds = staged.filter(function (r) {
                 return r.type === 'add';
@@ -719,8 +772,9 @@
 
         /**
          * After the file changed on disk: takes the freshly fetched cues. A staged edit stays staged if its oldText is
-         * still the text of its cue (found at the same number, or as the one cue with the same times); every other
-         * staged edit is marked failed. New lines are always kept. Saved and already failed rows are left alone.
+         * still the text of its cue (found at the same number, or as the one cue with the same times) and, when it
+         * changes the times, the line still has the times it was staged against; every other staged edit is marked
+         * failed. New lines are always kept. Saved and already failed rows are left alone.
          * Returns { kept, failed, relocated, newLines } as lists of row ids.
          */
         reconcile(freshCues, freshHash) {
@@ -741,7 +795,7 @@
                     return;
                 }
 
-                const found = locateCue(row, cues);
+                const found = locateStaged(row, cues);
                 if (found) {
                     if (found.index !== row.cueIndex) {
                         summary.relocated.push(row.rowId);
@@ -806,7 +860,7 @@
 
         /**
          * Puts a stored draft back into an empty model, checking it against freshly fetched cues: an edit whose oldText
-         * still matches (see locateCue) is staged again; any other edit comes back as a failed row. New lines come
+         * still matches (see locateStaged) is staged again; any other edit comes back as a failed row. New lines come
          * back staged if they still pass the checks, otherwise failed with the reason. Returns { restored, failed }.
          */
         restore(draft, freshCues, freshHash) {
@@ -820,7 +874,7 @@
             draft.rows.forEach(function (stored) {
                 const row = copyRow(stored);
                 if (row.type === 'edit' && typeof row.cueIndex === 'number' && typeof row.oldText === 'string' && typeof row.newText === 'string') {
-                    const found = locateCue(row, self.cues);
+                    const found = locateStaged(row, self.cues);
                     if (found) {
                         row.cueIndex = found.index;
                         row.start = found.start;
@@ -1208,6 +1262,8 @@
         normalizeText: normalizeText,
         validateCueText: validateCueText,
         validateNewLine: validateNewLine,
+        validateTimes: validateTimes,
+        timesChanged: timesChanged,
         splitStyleTags: splitStyleTags,
         hasStyleTags: hasStyleTags,
         screenText: screenText,

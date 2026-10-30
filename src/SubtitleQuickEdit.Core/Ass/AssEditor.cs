@@ -8,7 +8,7 @@ namespace SubtitleQuickEdit.Core.Ass;
 
 /// <summary>
 /// Applies edits to a parsed ASS/SSA document by splicing bytes into the original content. A text edit replaces only
-/// a Dialogue line's Text field. An added line copies every field but Start, End and Text from the Dialogue line it
+/// a Dialogue line's Text field, and its Start and End fields when it has new times. An added line copies every field but Start, End and Text from the Dialogue line it
 /// follows: the one that starts closest before it (ASS files need not be in time order, so this is by time, not by
 /// position).
 /// </summary>
@@ -22,6 +22,7 @@ internal static class AssEditor
         }
 
         var textEdits = new Dictionary<int, (string Old, string New)>();
+        var timeEdits = new Dictionary<int, (long Start, long End)>();
         var adds = new List<(SubtitleAddCue Cue, string Text, int Order)>();
         var clientIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (SubtitleEdit edit in edits)
@@ -39,6 +40,7 @@ internal static class AssEditor
                     }
 
                     CueRules.AcceptTextEdit(doc.Cues, te, NormalizeAndValidateText(te.NewText, te.CuePosition), textEdits);
+                    CueRules.AcceptTimes(doc.Cues, te, runtimeMs, AssDocument.MaxTimeMs, "A line must end by 99:59:59.99.", timeEdits);
                     break;
                 case SubtitleAddCue add:
                     adds.Add((add, CueRules.ForAdd(add, () => CheckAdd(add, runtimeMs, clientIds)), adds.Count));
@@ -61,6 +63,25 @@ internal static class AssEditor
             int from = doc.ByteOffset(l.TextStart);
             byte[] bytes = ByteSplicer.Encode(doc.Encoding, AssDocument.ToField(pair.Value.New), null, pair.Key);
             patches.Add(new BytePatch(from, doc.ByteOffset(l.TextEnd) - from, bytes, 0));
+        }
+
+        // New times: only the Start and End fields change, rounded to the centiseconds ASS keeps.
+        foreach (KeyValuePair<int, (long Start, long End)> pair in timeEdits.ToList())
+        {
+            long start = AssDocument.RoundTime(pair.Value.Start);
+            long end = AssDocument.RoundTime(pair.Value.End);
+            timeEdits[pair.Key] = (start, end);
+            SubtitleCue cue = doc.Cues[pair.Key - 1];
+            AssEvent ev = doc.Events[pair.Key - 1];
+            if (start != cue.StartMs)
+            {
+                patches.Add(FieldPatch(doc, ev, doc.StartField, AssDocument.FormatTime(start), pair.Key));
+            }
+
+            if (end != cue.EndMs)
+            {
+                patches.Add(FieldPatch(doc, ev, doc.EndField, AssDocument.FormatTime(end), pair.Key));
+            }
         }
 
         // Where each added line goes: after the Dialogue line that starts closest before it, or at the same time (the
@@ -99,7 +120,8 @@ internal static class AssEditor
                 SubtitleCue original = doc.Cues[k];
                 newPositionOfOriginal[k] = ordinal;
                 string finalText = textEdits.TryGetValue(original.Position, out (string Old, string New) te) ? te.New : original.Text;
-                expected.Add((original.StartMs, original.EndMs, finalText));
+                (long start, long end) = timeEdits.TryGetValue(original.Position, out (long Start, long End) times) ? times : (original.StartMs, original.EndMs);
+                expected.Add((start, end, finalText));
             }
 
             if (!addsAfter.TryGetValue(k, out List<(long Start, long End, string Text, string ClientId)>? group))
@@ -163,6 +185,23 @@ internal static class AssEditor
         }
 
         return text;
+    }
+
+    // Replaces one field before Text with a value, keeping the spaces around it.
+    private static BytePatch FieldPatch(AssDocument doc, AssEvent ev, int field, string value, int cuePosition)
+    {
+        int from = ev.LineStart + ev.Prefix.Length;
+        for (int i = 0; i < field; i++)
+        {
+            from += ev.Fields[i].Length + 1;
+        }
+
+        string written = ev.Fields[field];
+        string trimmed = written.TrimStart(' ', '\t');
+        from += written.Length - trimmed.Length;
+        int length = trimmed.TrimEnd(' ', '\t').Length;
+        int start = doc.ByteOffset(from);
+        return new BytePatch(start, doc.ByteOffset(from + length) - start, ByteSplicer.Encode(doc.Encoding, value, null, cuePosition), 0);
     }
 
     // An added line's checks: times, then its text.

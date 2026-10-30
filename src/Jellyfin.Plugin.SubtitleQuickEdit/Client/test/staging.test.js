@@ -19,7 +19,8 @@ test('stageEdit adds one row with the file text as oldText', () => {
     const r = m.stageEdit(FILE[1], 'Two fixed');
     assert.equal(r.ok, true);
     assert.deepEqual(m.snapshot(), [{
-        rowId: 'e1', type: 'edit', cueIndex: 2, start: 2000, end: 4000, oldText: 'Two', newText: 'Two fixed', status: 'staged', message: null,
+        rowId: 'e1', type: 'edit', cueIndex: 2, start: 2000, end: 4000, oldText: 'Two', newText: 'Two fixed', newStart: null, newEnd: null,
+        status: 'staged', message: null,
     }]);
 });
 

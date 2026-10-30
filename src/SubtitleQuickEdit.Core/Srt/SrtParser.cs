@@ -75,6 +75,7 @@ internal static class SrtParser
 
             bool precededByBlank = cues.Count == 0 || (index > 0 && kinds[index - 1] == LineKind.Blank);
             TextLine time = lines[timeLine];
+            Match times = SrtPatterns.TimeLine().Match(text, time.Start, time.End - time.Start);
             bool timeTerminated = time.TermEnd > time.End;
             bool textEmpty = end == timeLine + 1;
             int textStart;
@@ -135,7 +136,9 @@ internal static class SrtParser
                     TextEnd: textEnd,
                     TextEmpty: textEmpty,
                     TimeLineTerminated: timeTerminated,
-                    PrecededByBlankLine: precededByBlank),
+                    PrecededByBlankLine: precededByBlank,
+                    TimesStart: times.Groups[1].Index,
+                    TimesEnd: times.Groups[8].Index + times.Groups[8].Length),
             });
             lastContentLine = end - 1;
             index = end;
