@@ -24,6 +24,7 @@ internal static class SrtEditor
         }
 
         var textEdits = new Dictionary<int, (string Old, string New)>();
+        var timeEdits = new Dictionary<int, (long Start, long End)>();
         var adds = new List<(SubtitleAddCue Cue, string Text, int Order)>();
         var clientIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (SubtitleEdit edit in edits)
@@ -33,6 +34,7 @@ internal static class SrtEditor
                 case SubtitleTextEdit te:
                     CueRules.CheckTarget(doc.Cues, te, textEdits);
                     CueRules.AcceptTextEdit(doc.Cues, te, NormalizeAndValidateText(te.NewText, te.CuePosition), textEdits);
+                    CueRules.AcceptTimes(doc.Cues, te, runtimeMs, SrtDocument.MaxTimeMs, "A line ends after 99:59:59,999, which an .srt file cannot hold.", timeEdits);
                     break;
                 case SubtitleAddCue add:
                     adds.Add((add, CueRules.ForAdd(add, () => CheckAdd(add, runtimeMs, clientIds)), adds.Count));
@@ -66,6 +68,15 @@ internal static class SrtEditor
                 int from = doc.ByteOffset(l.TextStart);
                 patches.Add(new BytePatch(from, doc.ByteOffset(l.TextEnd) - from, bytes, 0));
             }
+        }
+
+        // New times: only the two times on the time line change; cue settings after them stay.
+        foreach (KeyValuePair<int, (long Start, long End)> pair in timeEdits)
+        {
+            CueLayout l = doc.Cues[pair.Key - 1].Layout;
+            string times = SrtDocument.FormatTime(pair.Value.Start) + " --> " + SrtDocument.FormatTime(pair.Value.End);
+            int from = doc.ByteOffset(l.TimesStart);
+            patches.Add(new BytePatch(from, doc.ByteOffset(l.TimesEnd) - from, ByteSplicer.Encode(doc.Encoding, times, null, pair.Key), 3));
         }
 
         // Where each added cue goes: before the first cue that starts later, otherwise at the end.
@@ -140,7 +151,8 @@ internal static class SrtEditor
             SubtitleCue original = doc.Cues[k];
             newPositionOfOriginal[k] = ordinal;
             string finalText = textEdits.TryGetValue(original.Position, out (string Old, string New) te) ? te.New : original.Text;
-            expected.Add((original.StartMs, original.EndMs, finalText));
+            (long start, long end) = timeEdits.TryGetValue(original.Position, out (long Start, long End) times) ? times : (original.StartMs, original.EndMs);
+            expected.Add((start, end, finalText));
             if (adds.Count > 0 && original.Number != ordinal)
             {
                 CueLayout l = original.Layout;

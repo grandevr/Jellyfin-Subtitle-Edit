@@ -573,7 +573,10 @@
         })[0] || null;
     }
 
-    /** Native track: staged text replaces the cue's text, staged new lines become cues; undone changes go back. */
+    /**
+     * Native track: staged text and times replace the cue's, staged new lines become cues; undone changes go back. A
+     * cue is matched by its start time in the file (kept on the cue once its times were changed here).
+     */
     function overlayNative(track, src) {
         const byStart = {};
         const added = {};
@@ -583,7 +586,7 @@
                 return;
             }
 
-            const key = Math.round(c.startTime * 1000);
+            const key = c.sqeStart !== undefined ? c.sqeStart : Math.round(c.startTime * 1000);
             (byStart[key] = byStart[key] || []).push(c);
         });
         const seen = {};
@@ -601,6 +604,18 @@
                 const want = L.screenText(edit ? edit.newText : cue.text, src.format);
                 if (String(shown.text).replace(DIRECTION_MARKS, '') !== want) {
                     shown.text = want;
+                }
+
+                if (shown.sqeStart === undefined) {
+                    shown.sqeStart = key;
+                }
+
+                const retimed = L.timesChanged(edit);
+                const start = retimed ? edit.newStart : cue.start;
+                const end = retimed ? edit.newEnd : cue.end;
+                if (Math.abs(shown.startTime * 1000 - start) > 1 || Math.abs(shown.endTime * 1000 - end) > 1) {
+                    shown.startTime = start / 1000;
+                    shown.endTime = end / 1000;
                 }
 
                 shown.sqeTouched = Boolean(edit);
@@ -643,7 +658,9 @@
     function overlayCustom(element, src) {
         const t = currentMs();
         const first = src.cues.filter(function (c) {
-            return c.start <= t && t <= c.end; // jellyfin-web shows the first line in the file that covers the time
+            const e = editFor(src, c);
+            const timed = L.timesChanged(e) ? { start: e.newStart, end: e.newEnd } : c;
+            return timed.start <= t && t <= timed.end; // jellyfin-web shows the first line in the file that covers the time
         })[0] || null;
         const edit = first ? editFor(src, first) : null;
         const add = src.adds.filter(function (r) {
@@ -985,7 +1002,24 @@
             item.setAttribute('data-cue-index', String(cue.index));
             const heading = el('div', 'sqe-cue-heading');
             heading.appendChild(el('span', 'sqe-cue-number', 'Line ' + cue.index));
-            heading.appendChild(el('span', 'sqe-cue-time', L.formatTime(cue.start) + ' → ' + L.formatTime(cue.end)));
+            const when = el('span', 'sqe-cue-when');
+            const retimed = L.timesChanged(row);
+            const time = el('span', 'sqe-cue-time' + (retimed ? ' sqe-time-changed' : ''),
+                L.formatTime(retimed ? row.newStart : cue.start) + ' → ' + L.formatTime(retimed ? row.newEnd : cue.end));
+            if (retimed) {
+                time.title = 'New times; in the file: ' + L.formatTime(cue.start) + ' → ' + L.formatTime(cue.end);
+            }
+
+            when.appendChild(time);
+            if (!cue.readOnly) {
+                const retime = button('sqe-retime', '✎', 'Change the times of line ' + cue.index, function () {
+                    openForm(null, cue, item);
+                });
+                retime.setAttribute('aria-label', 'Change the times of line ' + cue.index);
+                when.appendChild(retime);
+            }
+
+            heading.appendChild(when);
             if (cue.style) {
                 heading.appendChild(el('span', 'sqe-cue-style', cue.style));
             }
@@ -1151,7 +1185,8 @@
     /** The form's values: { startMs, endMs, text }; a time that does not parse is null. */
     function readForm() {
         const form = state.panel.form;
-        return { startMs: L.parseTime(form.start.value), endMs: L.parseTime(form.end.value), text: form.text.value };
+        const parts = form.parts || { prefix: '', suffix: '' };
+        return { startMs: L.parseTime(form.start.value), endMs: L.parseTime(form.end.value), text: parts.prefix + form.text.value + parts.suffix };
     }
 
     function fieldError(key, message) {
@@ -1173,7 +1208,10 @@
         const line = readForm();
         let warning = null;
         if (line.startMs !== null && line.endMs !== null && line.endMs > line.startMs) {
-            warning = L.overlapWarning(L.findOverlaps(panel.loaded.cues, line.startMs, line.endMs),
+            const others = form.cue ? panel.loaded.cues.filter(function (c) {
+                return c.index !== form.cue.index;
+            }) : panel.loaded.cues;
+            warning = L.overlapWarning(L.findOverlaps(others, line.startMs, line.endMs),
                 panel.model.stagedOverlaps(line.startMs, line.endMs, form.clientId).length);
         }
 
@@ -1224,10 +1262,11 @@
     }
 
     /**
-     * Opens the new-line form in place of the cue boxes: empty and prefilled at the current time, or with a staged (or
-     * failed) new line from the changes list so its text or timing can be changed.
+     * Opens the line form in place of the cue boxes: for a new line, empty and prefilled at the current time, or with
+     * a staged (or failed) new line from the changes list so its text or timing can be changed; or, with cue, for an
+     * existing line's times and text (box is that line's text box, whose typed text the form takes over).
      */
-    function openForm(row) {
+    function openForm(row, cue, box) {
         const panel = state.panel;
         if (!panel || !panel.model || panel.busy) {
             return;
@@ -1235,22 +1274,42 @@
 
         stopPreview();
         let line;
-        if (row) {
+        let staged = null;
+        let pending = null;
+        if (cue) {
+            staged = stagedRowFor(panel.model, cue);
+            const retimed = L.timesChanged(staged);
+            pending = {};
+            panel.cues.querySelectorAll('.sqe-cue').forEach(function (other) {
+                pending[Number(other.getAttribute('data-cue-index'))] = boxText(other);
+            });
+            line = {
+                startMs: retimed ? staged.newStart : cue.start,
+                endMs: retimed ? staged.newEnd : cue.end,
+                text: box ? boxText(box) : (staged ? staged.newText : cue.text),
+            };
+        } else if (row) {
             line = { startMs: row.startMs, endMs: row.endMs, text: row.text };
         } else {
             const d = L.defaultNewLine(panel.loaded.cues, currentMs(), panel.model.runtimeMs);
             line = { startMs: d.startMs, endMs: d.endMs, text: '' };
         }
 
-        const form = { clientId: row ? row.clientId : null, errors: {} };
+        const parts = cue && hidesTags(panel) ? L.splitStyleTags(line.text, panel.loaded.format) : { prefix: '', body: line.text, suffix: '' };
+        const form = { clientId: row ? row.clientId : null, cue: cue || null, pending: pending, parts: parts, errors: {} };
         panel.form = form;
-        const box = panel.cues;
-        box.textContent = '';
+        const container = panel.cues;
+        container.textContent = '';
         const item = el('section', 'sqe-new-line');
         const heading = el('div', 'sqe-cue-heading');
-        heading.appendChild(el('span', 'sqe-cue-number', 'New line'));
-        if (row) {
-            heading.appendChild(el('span', 'sqe-badge sqe-badge-' + row.status, row.status));
+        heading.appendChild(el('span', 'sqe-cue-number', cue ? 'Line ' + cue.index : 'New line'));
+        if (cue) {
+            heading.appendChild(el('span', 'sqe-cue-time', 'in the file: ' + L.formatTime(cue.start) + ' → ' + L.formatTime(cue.end)));
+        }
+
+        const badge = row || staged;
+        if (badge) {
+            heading.appendChild(el('span', 'sqe-badge sqe-badge-' + badge.status, badge.status));
         }
 
         item.appendChild(heading);
@@ -1259,8 +1318,8 @@
         const textWrap = el('div', 'sqe-field');
         const text = el('textarea', 'sqe-cue-text sqe-new-text');
         text.id = 'sqe-new-text';
-        text.value = line.text;
-        text.rows = Math.max(2, line.text.split('\n').length);
+        text.value = parts.body;
+        text.rows = Math.max(2, parts.body.split('\n').length);
         const caption = el('label', 'sqe-label', 'Text');
         caption.htmlFor = text.id;
         const textError = el('p', 'sqe-field-error');
@@ -1287,19 +1346,21 @@
             preview();
         }));
         buttons.appendChild(button('sqe-cancel', 'Cancel', 'Back to the lines', function () {
-            renderCues({ mode: 'active', cues: state.panel.shown }, '');
+            renderCues({ mode: 'active', cues: state.panel.shown }, '', form.pending || undefined);
         }));
         item.appendChild(buttons);
-        box.appendChild(item);
+        container.appendChild(item);
         panel.actions.hidden = false;
-        if (row && row.message) {
-            showStatus(row.message, true);
+        if (badge && badge.message) {
+            showStatus(badge.message, true);
+        } else if (cue) {
+            showStatus('Change the start or end time (or the text), then Apply. The line keeps its place in the file.');
         } else {
             showStatus(row ? 'Change the times or the text, then Apply.' : 'Set the times and type the text, then Apply.');
         }
 
         updateFormWarning();
-        text.focus();
+        (cue ? form.end : text).focus();
     }
 
     /** Stages the form's new line, or updates the staged one it was opened from. True when it was staged. */
@@ -1310,6 +1371,10 @@
         ['start', 'end', 'text'].forEach(function (key) {
             fieldError(key, null);
         });
+        if (form.cue) {
+            return applyLineForm(form, line);
+        }
+
         const result = form.clientId ? panel.model.updateAdd(form.clientId, line) : panel.model.stageAdd(line);
         if (!result.ok) {
             const shown = {};
@@ -1330,6 +1395,31 @@
         return true;
     }
 
+    /** Stages an existing line's form: its new times and text. True when it was staged (or set back to the file). */
+    function applyLineForm(form, line) {
+        const panel = state.panel;
+        const result = form.parts && (form.parts.prefix || form.parts.suffix) && L.normalizeText(form.text.value).trim().length === 0
+            ? { ok: false, errors: [{ field: 'text', message: 'A line must keep some text besides its style tags.' }] }
+            : panel.model.stageEdit(form.cue, line.text, { startMs: line.startMs, endMs: line.endMs });
+        if (!result.ok) {
+            result.errors.forEach(function (e) {
+                if (form.errors[e.field]) {
+                    fieldError(e.field, e.message);
+                }
+            });
+            showStatus('Fix the marked fields, then Apply.', true);
+            return false;
+        }
+
+        persist(panel.target, panel.model);
+        renderChanges();
+        const pending = form.pending || {};
+        delete pending[form.cue.index];
+        renderCues({ mode: 'active', cues: panel.shown }, result.row ? stagedNote('New times staged') :
+            (result.removed ? 'Back to the times and text in the file, so the change was dropped.' : 'Nothing changed.'), pending);
+        return true;
+    }
+
     /**
      * The Apply button and Ctrl+Enter: stages the form or the changed text boxes. For Save, an untouched empty form is
      * left out. False when the form could not be staged.
@@ -1341,7 +1431,7 @@
         }
 
         if (panel.form) {
-            if (forSave && !panel.form.clientId && panel.form.text.value.trim() === '') {
+            if (forSave && !panel.form.clientId && !panel.form.cue && panel.form.text.value.trim() === '') {
                 return true;
             }
 
@@ -1352,7 +1442,7 @@
         return true;
     }
 
-    /** Plays from 1 s before the new line's start to its end, then pauses, so the timing can be checked by ear. */
+    /** Plays from 1 s before the form's start time to its end, then pauses, so the timing can be checked by ear. */
     function preview() {
         const video = state.video;
         const line = readForm();
@@ -1400,18 +1490,26 @@
         const item = el('li', 'sqe-change sqe-change-' + row.status);
         item.setAttribute('data-row-id', row.rowId);
         const top = el('div', 'sqe-change-top');
+        const retimed = L.timesChanged(row);
         const where = row.type === 'add'
             ? (row.status === 'saved' && row.position ? 'Line ' + row.position + ' (new)' : 'New') + ' · ' +
               L.formatTime(row.startMs) + ' → ' + L.formatTime(row.endMs)
-            : 'Line ' + row.cueIndex + ' · ' + L.formatTime(row.start);
+            : 'Line ' + row.cueIndex + ' · ' + L.formatTime(retimed ? row.newStart : row.start);
         top.appendChild(el('span', 'sqe-change-where', where));
         top.appendChild(el('span', 'sqe-badge sqe-badge-' + row.status, row.status));
         item.appendChild(top);
         if (row.type === 'add') {
             item.appendChild(el('div', 'sqe-change-new', row.text));
         } else {
-            item.appendChild(el('div', 'sqe-change-old', row.oldText));
-            item.appendChild(el('div', 'sqe-change-new', row.newText));
+            if (retimed) {
+                item.appendChild(el('div', 'sqe-change-old', L.formatTime(row.start) + ' → ' + L.formatTime(row.end)));
+                item.appendChild(el('div', 'sqe-change-new', L.formatTime(row.newStart) + ' → ' + L.formatTime(row.newEnd)));
+            }
+
+            if (!retimed || L.normalizeText(row.oldText) !== row.newText) {
+                item.appendChild(el('div', 'sqe-change-old', row.oldText));
+                item.appendChild(el('div', 'sqe-change-new', row.newText));
+            }
         }
 
         if (row.message) {
@@ -1428,7 +1526,7 @@
             });
             item.appendChild(undo);
         } else if (row.type === 'edit') {
-            const undoSaved = button('sqe-undo-saved', 'Undo', 'Stage the old text again (Save writes it)', function (e) {
+            const undoSaved = button('sqe-undo-saved', 'Undo', 'Stage the old text and times again (Save writes them)', function (e) {
                 e.stopPropagation();
                 const panel = state.panel;
                 const result = panel.model.undoSaved(row.rowId);
@@ -1446,7 +1544,7 @@
                     showCue(cue);
                 }
 
-                showStatus(stagedNote('The old text is staged'));
+                showStatus(stagedNote(retimed ? 'The old text and times are staged' : 'The old text is staged'));
             });
             item.appendChild(undoSaved);
         }
@@ -1733,9 +1831,18 @@
             item.appendChild(el('span', 'sqe-change-where', 'New · ' + L.formatTime(edit.startMs) + ' → ' + L.formatTime(edit.endMs)));
             item.appendChild(el('div', 'sqe-change-new', edit.text));
         } else {
+            const retimed = typeof edit.startMs === 'number' && typeof edit.endMs === 'number';
             item.appendChild(el('span', 'sqe-change-where', 'Line ' + edit.cueIndex + ' · ' + L.formatTime(edit.cueStart)));
-            item.appendChild(el('div', 'sqe-change-old', edit.oldText));
-            item.appendChild(el('div', 'sqe-change-new', edit.newText));
+            if (retimed) {
+                item.appendChild(el('div', 'sqe-change-old', L.formatTime(edit.cueStart) +
+                    (typeof edit.cueEnd === 'number' ? ' → ' + L.formatTime(edit.cueEnd) : '')));
+                item.appendChild(el('div', 'sqe-change-new', L.formatTime(edit.startMs) + ' → ' + L.formatTime(edit.endMs)));
+            }
+
+            if (!retimed || edit.oldText !== edit.newText) {
+                item.appendChild(el('div', 'sqe-change-old', edit.oldText));
+                item.appendChild(el('div', 'sqe-change-new', edit.newText));
+            }
         }
 
         if (edit.outcome && edit.outcome !== 'Pending') {

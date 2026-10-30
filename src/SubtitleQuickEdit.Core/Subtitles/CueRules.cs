@@ -6,7 +6,7 @@ namespace SubtitleQuickEdit.Core.Subtitles;
 
 /// <summary>
 /// The edit checks every format shares: which cue a text edit names, whether its old text still matches, and whether
-/// an added line's times are usable.
+/// an added line's or an edited line's times are usable.
 /// </summary>
 internal static class CueRules
 {
@@ -81,29 +81,72 @@ internal static class CueRules
             throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "Two added lines share the client id '" + add.ClientId + "'.");
         }
 
-        if (add.StartMs < 0)
+        CheckSpan(add.StartMs, add.EndMs, runtimeMs, maxTimeMs, maxTimeMessage, "A new line", null);
+    }
+
+    /// <summary>
+    /// Checks a text edit's new times, if it has any. A cue keeps its place in the file when its times change.
+    /// </summary>
+    /// <param name="cues">The document's cues.</param>
+    /// <param name="edit">The edit; its target was checked with <see cref="CheckTarget"/>.</param>
+    /// <param name="runtimeMs">The item's runtime, or null to skip that check.</param>
+    /// <param name="maxTimeMs">The largest time the format can hold.</param>
+    /// <param name="maxTimeMessage">The message when the line ends after <paramref name="maxTimeMs"/>.</param>
+    /// <param name="seen">The time edits so far, by cue position: the new start and end.</param>
+    internal static void AcceptTimes(
+        IReadOnlyList<SubtitleCue> cues,
+        SubtitleTextEdit edit,
+        long? runtimeMs,
+        long maxTimeMs,
+        string maxTimeMessage,
+        Dictionary<int, (long Start, long End)> seen)
+    {
+        if (edit.NewStartMs is null && edit.NewEndMs is null)
         {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line cannot start before 00:00:00,000.");
+            return;
         }
 
-        if (add.EndMs <= add.StartMs)
+        if (edit.NewStartMs is not long start || edit.NewEndMs is not long end)
         {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line must end after it starts.");
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "New times for a line need both a start and an end.", edit.CuePosition);
         }
 
-        if (add.EndMs - add.StartMs < SubtitleLimits.MinCueDurationMs)
+        SubtitleCue cue = cues[edit.CuePosition - 1];
+        if (start == cue.StartMs && end == cue.EndMs)
         {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line must be at least 100 ms long.");
+            return;
         }
 
-        if (add.EndMs > maxTimeMs)
+        CheckSpan(start, end, runtimeMs, maxTimeMs, maxTimeMessage, "A line", edit.CuePosition);
+        seen[edit.CuePosition] = (start, end);
+    }
+
+    // The time checks a new line and a line with new times share.
+    private static void CheckSpan(long startMs, long endMs, long? runtimeMs, long maxTimeMs, string maxTimeMessage, string subject, int? cuePosition)
+    {
+        if (startMs < 0)
         {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, maxTimeMessage);
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, subject + " cannot start before 00:00:00,000.", cuePosition);
         }
 
-        if (runtimeMs.HasValue && add.EndMs > runtimeMs.Value)
+        if (endMs <= startMs)
         {
-            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new line must not end after the end of the video.");
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, subject + " must end after it starts.", cuePosition);
+        }
+
+        if (endMs - startMs < SubtitleLimits.MinCueDurationMs)
+        {
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, subject + " must be at least 100 ms long.", cuePosition);
+        }
+
+        if (endMs > maxTimeMs)
+        {
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, maxTimeMessage, cuePosition);
+        }
+
+        if (runtimeMs.HasValue && endMs > runtimeMs.Value)
+        {
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, subject + " must not end after the end of the video.", cuePosition);
         }
     }
 

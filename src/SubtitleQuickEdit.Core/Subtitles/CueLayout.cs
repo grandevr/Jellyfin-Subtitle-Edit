@@ -12,6 +12,8 @@ namespace SubtitleQuickEdit.Core.Subtitles;
 /// <param name="TextEmpty">True when the cue has no text lines.</param>
 /// <param name="TimeLineTerminated">True when the time line ends with a line terminator.</param>
 /// <param name="PrecededByBlankLine">True when a blank line (or the start of the file) precedes the cue.</param>
+/// <param name="TimesStart">First character of the start time on the time line (SRT, WebVTT), or -1.</param>
+/// <param name="TimesEnd">End (exclusive) of the end time on the time line (SRT, WebVTT), or -1. Cue settings after it are kept.</param>
 internal readonly record struct CueLayout(
     int BlockStart,
     int NumberStart,
@@ -21,4 +23,6 @@ internal readonly record struct CueLayout(
     int TextEnd,
     bool TextEmpty,
     bool TimeLineTerminated,
-    bool PrecededByBlankLine);
+    bool PrecededByBlankLine,
+    int TimesStart = -1,
+    int TimesEnd = -1);

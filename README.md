@@ -1,7 +1,7 @@
 # Subtitle Editor for Jellyfin
 
 Fix a wrong subtitle line while you watch. Subtitle Editor adds an edit button to the Jellyfin web player: pause on
-the bad line, correct the text (or add a missing line with its timing), save, and the player shows the fix. The
+the bad line, correct the text or its timing (or add a missing line), save, and the player shows the fix. The
 subtitle file next to your video is changed in place, and the original is kept as a backup.
 
 - Edits external `.srt`, `.vtt`, `.ass` and `.ssa` subtitles, byte for byte: only the lines you change are touched.
@@ -43,7 +43,8 @@ button. It pauses the video and opens a panel (a side panel on desktop, a sheet 
 - **Apply** (Ctrl+Enter) stages a change, **Save** (Ctrl+S) writes all staged changes at once, and **Reload subtitles**
   makes the player show the saved file without restarting playback.
 - **+ Add line** adds a new line, with start and end times, "Set to now", ±100 ms nudges, a preview and an overlap
-  warning.
+  warning. The pencil next to a line's times opens the same form for that line, to change when it starts and ends.
+  The line keeps its place in the file.
 - **Changes this session** lists every change with its state, Undo, and a click to jump to it.
 - **Revert to original** puts back the file as it was before your first edit.
 - Unsaved changes survive a page reload. Esc closes the panel; keys typed in it never reach the player.

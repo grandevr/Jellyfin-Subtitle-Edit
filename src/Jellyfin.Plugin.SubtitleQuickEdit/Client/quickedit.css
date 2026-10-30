@@ -592,3 +592,27 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     line-height: 1.4;
 }
+
+/* A line's times, with the pencil that opens its timing form. */
+.sqe-cue-when {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sqe-cue-time.sqe-time-changed {
+    color: var(--sqe-fg);
+    font-weight: 600;
+}
+
+.sqe-button.sqe-retime {
+    min-width: 32px;
+    padding: 2px 8px;
+    line-height: 1.2;
+}
+
+@media (pointer: coarse), (max-width: 600px) {
+    .sqe-button.sqe-retime {
+        min-width: 44px;
+    }
+}

@@ -252,9 +252,18 @@
                         body.appendChild(el('div', 'sqe-where', 'New line · ' + time(edit.startMs) + ' → ' + time(edit.endMs)));
                         body.appendChild(el('div', 'sqe-new', edit.text));
                     } else {
+                        var retimed = typeof edit.startMs === 'number' && typeof edit.endMs === 'number';
                         body.appendChild(el('div', 'sqe-where', 'Line ' + edit.cueIndex + ' · ' + time(edit.cueStart)));
-                        body.appendChild(el('div', 'sqe-old', edit.oldText));
-                        body.appendChild(el('div', 'sqe-new', edit.newText));
+                        if (retimed) {
+                            body.appendChild(el('div', 'sqe-old', 'Times ' + time(edit.cueStart) +
+                                (typeof edit.cueEnd === 'number' ? ' → ' + time(edit.cueEnd) : '')));
+                            body.appendChild(el('div', 'sqe-new', 'Times ' + time(edit.startMs) + ' → ' + time(edit.endMs)));
+                        }
+
+                        if (!retimed || edit.oldText !== edit.newText) {
+                            body.appendChild(el('div', 'sqe-old', edit.oldText));
+                            body.appendChild(el('div', 'sqe-new', edit.newText));
+                        }
                     }
 
                     if (edit.outcome && edit.outcome !== 'Pending') {

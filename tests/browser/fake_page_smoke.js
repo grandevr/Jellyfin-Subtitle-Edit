@@ -104,7 +104,10 @@ setTimeout(() => {
         window.fakeEditsSent.push(body);
         const f = file();
         if (body.baseHash !== f.hash) { return refused(409, { code: 'FileChanged', message: 'changed', currentHash: f.hash }); }
-        body.edits.filter((e) => e.type === 'edit').forEach((e) => { f.cues[e.cueIndex - 1].text = e.newText; });
+        body.edits.filter((e) => e.type === 'edit').forEach((e) => {
+          const c = f.cues[e.cueIndex - 1]; c.text = e.newText;
+          if (typeof e.startMs === 'number') { c.start = e.startMs; c.end = e.endMs; } // new times; the line keeps its place
+        });
         const added = {};
         body.edits.filter((e) => e.type === 'add').forEach((e) => {
           const cue = { start: e.startMs, end: e.endMs, text: e.text, clientId: e.clientId };
@@ -458,6 +461,72 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   info.custom = { c1, c2, reloadStatus };
   await q.close();
 
+  // Changing the times of an existing line: the pencil next to its times opens the Add line form for that line.
+  const t = await b.newPage();
+  await t.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  t.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
+  t.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+  t.on('dialog', (d) => d.accept());
+  await t.goto(ORIGIN + '/web/index.html');
+  await t.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  await t.click('.sqe-edit-button');
+  await t.waitForSelector('.sqe-cue-text', { timeout: 5000 });
+  const tField = (k) => t.inputValue('.sqe-new-line .sqe-' + k);
+  const tErr = (k) => t.$eval('#sqe-new-' + k, (e) => { const x = e.closest('.sqe-field').querySelector('.sqe-field-error'); return x.hidden ? '' : x.textContent; });
+  const tTrack = () => t.evaluate(() => Array.from(Array.from(document.querySelector('video').textTracks).find((x) => x.label === 'manualTrack').cues)
+    .map((c) => Math.round(c.startTime * 1000) + '-' + Math.round(c.endTime * 1000) + ':' + c.text.replace(/[\u200e\u200f]/g, '')).join('|'));
+  checks['timing: each editable line has a pencil next to its times'] =
+    (await t.$eval('.sqe-cue .sqe-cue-when', (e) => e.querySelector('.sqe-cue-time').textContent + '|' + e.querySelector('.sqe-retime').title)) ===
+    '00:00:00,000 → 00:00:02,000|Change the times of line 1';
+  await t.fill('.sqe-cue-text', 'Hello typed');
+  await t.click('.sqe-retime');
+  await t.waitForSelector('.sqe-new-line', { timeout: 3000 });
+  checks['timing: the pencil opens the line form with its times, its typed text, and the end field focused'] =
+    (await t.$eval('.sqe-new-line .sqe-cue-number', (e) => e.textContent)) === 'Line 1' &&
+    (await tField('start')) === '00:00:00,000' && (await tField('end')) === '00:00:02,000' &&
+    (await t.inputValue('.sqe-new-text')) === 'Hello typed' && (await t.evaluate(() => document.activeElement.id)) === 'sqe-new-end';
+  checks['timing: the line does not warn about overlapping itself'] = await t.$eval('.sqe-warning', (e) => e.hidden);
+  await t.click('.sqe-cancel');
+  checks['timing: Cancel keeps the text typed in the box'] = (await t.inputValue('.sqe-cue-text')) === 'Hello typed';
+  await t.fill('.sqe-cue-text', 'Hello there');
+  await t.click('.sqe-retime');
+  await t.fill('.sqe-new-line .sqe-start', '00:00:01,000');
+  await t.fill('.sqe-new-line .sqe-end', '00:00:00,500');
+  await t.click('.sqe-apply');
+  checks['timing: an end before the start is refused on the end field'] = (await tErr('end')) === 'A line must end after it starts.';
+  await t.fill('.sqe-new-line .sqe-start', '00:00:00,000');
+  await t.fill('.sqe-new-line .sqe-end', '00:01:30,000');
+  await t.click('.sqe-apply');
+  checks['timing: an end past the runtime is refused'] = (await tErr('end')) === 'A line must not end after the end of the video.';
+  await t.fill('.sqe-new-line .sqe-end', '00:00:01,500');
+  await t.keyboard.press('Control+Enter');
+  const tRows = await t.$$eval('.sqe-change', (els) => els.map((e) => e.textContent));
+  checks['timing: Apply stages the new times, shown in the list and in the line heading'] = !(await t.$('.sqe-new-line')) &&
+    tRows.length === 1 && tRows[0].indexOf('Line 1 · 00:00:00,000staged00:00:00,000 → 00:00:02,00000:00:00,000 → 00:00:01,500') === 0 &&
+    (await t.$eval('.sqe-cue .sqe-cue-time', (e) => e.className + '|' + e.textContent)) === 'sqe-cue-time sqe-time-changed|00:00:00,000 → 00:00:01,500';
+  checks['timing: the player shows the line with its new times'] = (await tTrack()).split('|')[0] === '0-1500:Hello there';
+  if (process.env.SQE_SHOTS) {
+    await t.screenshot({ path: process.env.SQE_SHOTS + '/fake-timing-lines.png' });
+    await t.click('.sqe-retime');
+    await t.screenshot({ path: process.env.SQE_SHOTS + '/fake-timing-form.png' });
+    await t.click('.sqe-cancel');
+  }
+  await t.click('.sqe-save');
+  await t.waitForFunction(() => document.querySelector('.sqe-status').textContent.indexOf('Saved') === 0, null, { timeout: 5000 });
+  const tSent = await t.evaluate(() => window.fakeEditsSent[window.fakeEditsSent.length - 1].edits);
+  checks['timing: Save sends the line with its new times'] = JSON.stringify(tSent) ===
+    JSON.stringify([{ type: 'edit', cueIndex: 1, oldText: 'Hello there', newText: 'Hello there', startMs: 0, endMs: 1500 }]);
+  checks['timing: the file has the new times'] = (await t.evaluate(() => file().cues[0].end)) === 1500;
+  await t.$eval('.sqe-change-saved .sqe-undo-saved', (e) => e.click());
+  checks['timing: Undo on the saved change stages the old times'] =
+    (await t.$$eval('.sqe-change-staged', (els) => els.map((e) => e.textContent))).some((x) => x.indexOf('00:00:00,000 → 00:00:02,000') > 0) &&
+    (await tTrack()).split('|')[0] === '0-2000:Hello there';
+  await t.setViewportSize({ width: 390, height: 844 });
+  const pencil = await t.$eval('.sqe-retime', (e) => { const r = e.getBoundingClientRect(); return Math.round(r.width) + 'x' + Math.round(r.height); });
+  checks['timing: at phone width the pencil is a 44 px touch target'] = pencil === '44x44';
+  info.pencil = pencil;
+  await t.close();
+
   // A user who may only submit: same editing, but Submit for review instead of Save, and their own submissions.
   const r = await b.newPage();
   await r.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
@@ -648,90 +717,90 @@ const html = `<html><head><meta charset="utf-8"><style>${css}</style></head><bod
   await e3.close();
 
   // A new subtitle track: subtitles off, and Sessions slow to show the item.
-  const t = await b.newPage();
-  await t.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
-  t.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
-  t.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
-  t.on('dialog', (d) => d.accept());
+  const nt = await b.newPage();
+  await nt.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  nt.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+  nt.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
+  nt.on('dialog', (d) => d.accept());
   const loaded = Date.now();
-  await t.goto(ORIGIN + '/web/index.html?nosub=1&slow=1');
-  await t.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  await nt.goto(ORIGIN + '/web/index.html?nosub=1&slow=1');
+  await nt.waitForSelector('.sqe-edit-button', { timeout: 8000 });
   const shownAfter = Date.now() - loaded;
   checks['new track: with subtitles off the button shows before Sessions knows the item'] = shownAfter < 2500 &&
-    (await t.evaluate(() => window.SubtitleQuickEdit.debugState().session)) === null &&
-    (await t.getAttribute('.sqe-edit-button', 'title')) === 'Edit subtitles or start a new track';
+    (await nt.evaluate(() => window.SubtitleQuickEdit.debugState().session)) === null &&
+    (await nt.getAttribute('.sqe-edit-button', 'title')) === 'Edit subtitles or start a new track';
   info.newTrackButtonMs = shownAfter;
-  await t.click('.sqe-edit-button');
-  checks['new track: pressed early, the panel says Loading'] = (await t.$eval('.sqe-status', (e) => e.textContent)) === 'Loading…';
-  await t.waitForFunction(() => /Ep\.pl\.srt/.test((document.querySelector('.sqe-extract-what') || {}).textContent || ''), null, { timeout: 8000 });
+  await nt.click('.sqe-edit-button');
+  checks['new track: pressed early, the panel says Loading'] = (await nt.$eval('.sqe-status', (e) => e.textContent)) === 'Loading…';
+  await nt.waitForFunction(() => /Ep\.pl\.srt/.test((document.querySelector('.sqe-extract-what') || {}).textContent || ''), null, { timeout: 8000 });
   checks['new track: the panel offers a new track in the user\'s subtitle language, and the file name'] =
-    (await t.$eval('.sqe-title', (e) => e.textContent)) === 'New subtitle track' &&
-    (await t.$eval('.sqe-status', (e) => e.textContent)).indexOf('No subtitle is on.') === 0 &&
-    (await t.inputValue('.sqe-new-language')) === 'pl' &&
-    (await t.$eval('.sqe-extract-what', (e) => e.textContent)) === 'The new file will be \u201cEp.pl.srt\u201d.' &&
-    !(await t.$eval('.sqe-start-new', (e) => e.disabled)) && await t.$eval('.sqe-actions', (e) => e.hidden);
-  await t.waitForSelector('.sqe-switch-track', { timeout: 3000 }).catch(() => null);
-  checks['new track: the subtitle that can be edited is offered too'] = (await t.$$('.sqe-switch-track')).length === 1;
-  await t.keyboard.press('Control+s');
-  checks['new track: Ctrl+S in the choice makes nothing'] = (await t.evaluate(() => window.fakeNewSent.length)) === 0;
-  await t.selectOption('.sqe-new-language', 'en');
-  await t.waitForFunction(() => document.querySelector('.sqe-extract-what').textContent.indexOf('Ep.en.srt') >= 0, null, { timeout: 3000 });
-  await t.selectOption('.sqe-new-language', '');
-  await t.waitForFunction(() => document.querySelector('.sqe-extract-what').textContent === 'The new file will be \u201cEp.srt\u201d.', null, { timeout: 3000 })
+    (await nt.$eval('.sqe-title', (e) => e.textContent)) === 'New subtitle track' &&
+    (await nt.$eval('.sqe-status', (e) => e.textContent)).indexOf('No subtitle is on.') === 0 &&
+    (await nt.inputValue('.sqe-new-language')) === 'pl' &&
+    (await nt.$eval('.sqe-extract-what', (e) => e.textContent)) === 'The new file will be \u201cEp.pl.srt\u201d.' &&
+    !(await nt.$eval('.sqe-start-new', (e) => e.disabled)) && await nt.$eval('.sqe-actions', (e) => e.hidden);
+  await nt.waitForSelector('.sqe-switch-track', { timeout: 3000 }).catch(() => null);
+  checks['new track: the subtitle that can be edited is offered too'] = (await nt.$$('.sqe-switch-track')).length === 1;
+  await nt.keyboard.press('Control+s');
+  checks['new track: Ctrl+S in the choice makes nothing'] = (await nt.evaluate(() => window.fakeNewSent.length)) === 0;
+  await nt.selectOption('.sqe-new-language', 'en');
+  await nt.waitForFunction(() => document.querySelector('.sqe-extract-what').textContent.indexOf('Ep.en.srt') >= 0, null, { timeout: 3000 });
+  await nt.selectOption('.sqe-new-language', '');
+  await nt.waitForFunction(() => document.querySelector('.sqe-extract-what').textContent === 'The new file will be \u201cEp.srt\u201d.', null, { timeout: 3000 })
     .catch(() => null);
   checks['new track: another language, or none, changes the file name'] =
-    (await t.$eval('.sqe-extract-what', (e) => e.textContent)) === 'The new file will be \u201cEp.srt\u201d.';
-  await t.selectOption('.sqe-new-language', 'en');
-  await t.waitForFunction(() => document.querySelector('.sqe-extract-what').textContent.indexOf('Ep.en.srt') >= 0, null, { timeout: 3000 });
-  await t.click('.sqe-start-new');
+    (await nt.$eval('.sqe-extract-what', (e) => e.textContent)) === 'The new file will be \u201cEp.srt\u201d.';
+  await nt.selectOption('.sqe-new-language', 'en');
+  await nt.waitForFunction(() => document.querySelector('.sqe-extract-what').textContent.indexOf('Ep.en.srt') >= 0, null, { timeout: 3000 });
+  await nt.click('.sqe-start-new');
   checks['new track: Start opens an empty editor with + Add line, no Reload or Revert, Save off'] =
-    (await t.$eval('.sqe-status', (e) => e.textContent)).indexOf('\u201cEp.en.srt\u201d') > 0 &&
-    !(await t.$eval('.sqe-add', (e) => e.disabled)) && !(await t.$eval('.sqe-actions', (e) => e.hidden)) &&
-    (await t.$eval('.sqe-reload', (e) => e.hidden)) && (await t.$eval('.sqe-revert', (e) => e.hidden)) &&
-    (await t.$eval('.sqe-save', (e) => e.disabled)) && (await t.$$('.sqe-cue-text')).length === 0;
-  await t.click('.sqe-add');
-  await t.fill('.sqe-new-text', 'The first line');
-  await t.keyboard.press('Control+Enter');
-  checks['new track: a staged line is listed, and the note says Save makes the file'] = (await t.$$('.sqe-change')).length === 1 &&
-    (await t.$eval('.sqe-status', (e) => e.textContent)).indexOf('Save writes the new subtitle file') > 0 &&
-    !(await t.$eval('.sqe-save', (e) => e.disabled));
-  await t.reload();
-  await t.waitForSelector('.sqe-edit-button', { timeout: 8000 });
-  await t.click('.sqe-edit-button');
-  await t.waitForSelector('.sqe-start-new:not([disabled])', { timeout: 8000 });
-  await t.click('.sqe-start-new');
-  checks['new track: the staged line survives a page reload'] = (await t.$$('.sqe-change')).length === 1 &&
-    (await t.$eval('.sqe-status', (e) => e.textContent)).indexOf('Restored 1') === 0;
-  await t.keyboard.press('Control+s');
-  await t.waitForFunction(() => window.fakePlaying, null, { timeout: 5000 }).catch(() => null);
-  const made = await t.evaluate(() => ({ sent: window.fakeNewSent, playing: window.fakePlaying }));
+    (await nt.$eval('.sqe-status', (e) => e.textContent)).indexOf('\u201cEp.en.srt\u201d') > 0 &&
+    !(await nt.$eval('.sqe-add', (e) => e.disabled)) && !(await nt.$eval('.sqe-actions', (e) => e.hidden)) &&
+    (await nt.$eval('.sqe-reload', (e) => e.hidden)) && (await nt.$eval('.sqe-revert', (e) => e.hidden)) &&
+    (await nt.$eval('.sqe-save', (e) => e.disabled)) && (await nt.$$('.sqe-cue-text')).length === 0;
+  await nt.click('.sqe-add');
+  await nt.fill('.sqe-new-text', 'The first line');
+  await nt.keyboard.press('Control+Enter');
+  checks['new track: a staged line is listed, and the note says Save makes the file'] = (await nt.$$('.sqe-change')).length === 1 &&
+    (await nt.$eval('.sqe-status', (e) => e.textContent)).indexOf('Save writes the new subtitle file') > 0 &&
+    !(await nt.$eval('.sqe-save', (e) => e.disabled));
+  await nt.reload();
+  await nt.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  await nt.click('.sqe-edit-button');
+  await nt.waitForSelector('.sqe-start-new:not([disabled])', { timeout: 8000 });
+  await nt.click('.sqe-start-new');
+  checks['new track: the staged line survives a page reload'] = (await nt.$$('.sqe-change')).length === 1 &&
+    (await nt.$eval('.sqe-status', (e) => e.textContent)).indexOf('Restored 1') === 0;
+  await nt.keyboard.press('Control+s');
+  await nt.waitForFunction(() => window.fakePlaying, null, { timeout: 5000 }).catch(() => null);
+  const made = await nt.evaluate(() => ({ sent: window.fakeNewSent, playing: window.fakePlaying }));
   checks['new track: Save sends the language and the line in one request'] = made.sent.length === 1 && made.sent[0].language === 'pl' &&
     made.sent[0].edits.length === 1 && made.sent[0].edits[0].type === 'add' && made.sent[0].edits[0].text === 'The first line' &&
     made.sent[0].baseHash === undefined;
   checks['new track: then playback restarts on the new track'] = Boolean(made.playing) && made.playing.subtitleStreamIndex === 5;
-  await t.waitForSelector('.sqe-toast', { timeout: 3000 }).catch(() => null);
+  await nt.waitForSelector('.sqe-toast', { timeout: 3000 }).catch(() => null);
   checks['new track: a message says the file was made'] =
-    ((await t.$eval('.sqe-toast', (x) => x.textContent).catch(() => '')) || '').indexOf('Made \u201cEp.pl.srt\u201d with 1 line.') === 0;
-  checks['new track: the draft is gone'] = (await t.evaluate(() => Object.keys(localStorage).filter((k) => k.indexOf('sqe:') === 0).length)) === 0;
-  await t.close();
+    ((await nt.$eval('.sqe-toast', (x) => x.textContent).catch(() => '')) || '').indexOf('Made \u201cEp.pl.srt\u201d with 1 line.') === 0;
+  checks['new track: the draft is gone'] = (await nt.evaluate(() => Object.keys(localStorage).filter((k) => k.indexOf('sqe:') === 0).length)) === 0;
+  await nt.close();
 
-  const u = await b.newPage();
-  await u.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
-  u.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
-  await u.goto(ORIGIN + '/web/index.html?nosub=1&taken=1');
-  await u.waitForSelector('.sqe-edit-button', { timeout: 8000 });
-  await u.click('.sqe-edit-button');
-  await u.waitForFunction(() => /already/.test((document.querySelector('.sqe-extract-what') || {}).textContent || ''), null, { timeout: 8000 });
-  checks['new track, name taken: no Start, a switch to that file'] = (await u.$eval('.sqe-start-new', (e) => e.disabled)) &&
-    !(await u.$eval('.sqe-switch-existing', (e) => e.hidden));
-  await u.close();
+  const nu = await b.newPage();
+  await nu.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  nu.on('pageerror', (e) => logs.push('pageerror: ' + e.message));
+  await nu.goto(ORIGIN + '/web/index.html?nosub=1&taken=1');
+  await nu.waitForSelector('.sqe-edit-button', { timeout: 8000 });
+  await nu.click('.sqe-edit-button');
+  await nu.waitForFunction(() => /already/.test((document.querySelector('.sqe-extract-what') || {}).textContent || ''), null, { timeout: 8000 });
+  checks['new track, name taken: no Start, a switch to that file'] = (await nu.$eval('.sqe-start-new', (e) => e.disabled)) &&
+    !(await nu.$eval('.sqe-switch-existing', (e) => e.hidden));
+  await nu.close();
 
-  const v = await b.newPage();
-  await v.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
-  await v.goto(ORIGIN + '/web/index.html?nosub=1&role=submitter');
-  await v.waitForTimeout(2500);
-  checks['new track: a submitter gets no button with subtitles off'] = !(await v.$('.sqe-edit-button'));
-  await v.close();
+  const nv = await b.newPage();
+  await nv.route(ORIGIN + '/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+  await nv.goto(ORIGIN + '/web/index.html?nosub=1&role=submitter');
+  await nv.waitForTimeout(2500);
+  checks['new track: a submitter gets no button with subtitles off'] = !(await nv.$('.sqe-edit-button'));
+  await nv.close();
 
   checks['no errors in the console'] = logs.every((l) => !/^(error|pageerror)/.test(l));
 

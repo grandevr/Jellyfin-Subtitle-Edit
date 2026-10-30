@@ -6,8 +6,8 @@ using SubtitleQuickEdit.Core.Subtitles;
 namespace SubtitleQuickEdit.Core.Ass;
 
 /// <summary>
-/// A parsed ASS or SSA file. Its cues are the Dialogue lines of the [Events] section, in file order; only their Text
-/// field is ever changed. Styles, fonts, Comment lines, the other fields and override tags stay as they are. In cue
+/// A parsed ASS or SSA file. Its cues are the Dialogue lines of the [Events] section, in file order; only their Text,
+/// Start and End fields are ever changed. Styles, fonts, Comment lines, the other fields and override tags stay as they are. In cue
 /// text, the file's <c>\N</c> hard line break is a <c>\n</c>.
 /// </summary>
 public sealed class AssDocument : ISubtitleDocument

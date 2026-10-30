@@ -6,12 +6,18 @@ version's changelog.
 
 ## Unreleased
 
-- Start a new subtitle track from scratch: for users who may save directly, the edit button is always in the player,
-  also with subtitles off, and shows as soon as the player's controls do. With no editable subtitle on, the panel
-  offers a new track (with a language for its name); the first Save writes `{video}[.{language}].srt` next to the video
-  and restarts playback on it. Admins see these files with the editable copies in the settings page.
-- With "Original + last N saves", many saves of one subtitle within the same millisecond, or after the server clock
-  went back, could prune the newest backup instead of an older one.
+- New: start a new subtitle track from scratch. For users who may save directly, the edit button is always in the
+  player, also with subtitles off, and shows as soon as the player's controls do. With no editable subtitle on, the
+  panel offers a new track (with a language for its name); the first Save writes `{video}[.{language}].srt` next to the
+  video and restarts playback on it. Admins see these files with the editable copies in the settings page.
+
+## 1.3.0.0
+
+- Change the times of an existing line: the pencil next to a line's times opens the Add line form for that line. Works
+  for SRT, WebVTT and ASS/SSA; only the two times change, everything else on the line stays. Users who submit changes
+  for review can suggest new times too.
+- Fixed: with "Original + last N saves", many saves of one subtitle within the same millisecond, or after the server
+  clock went back, could prune the newest backup instead of an older one.
 
 ## 1.2.2.0
 

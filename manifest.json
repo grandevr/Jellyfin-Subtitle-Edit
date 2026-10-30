@@ -8,6 +8,14 @@
     "category": "Subtitles",
     "versions": [
       {
+        "version": "1.3.0.0",
+        "changelog": "- Change the times of an existing line: the pencil next to a line's times opens the Add line form for that line. Works\n  for SRT, WebVTT and ASS/SSA; only the two times change, everything else on the line stays. Users who submit changes\n  for review can suggest new times too.\n- Fixed: with \"Original + last N saves\", many saves of one subtitle within the same millisecond, or after the server\n  clock went back, could prune the newest backup instead of an older one.",
+        "targetAbi": "12.3.0.0",
+        "sourceUrl": "https://github.com/grandevr/Jellyfin-Subtitle-Edit/releases/download/v1.3.0.0/subtitle-editor_1.3.0.0.zip",
+        "checksum": "4d2e13a59f897995f97bf8ab005eddec",
+        "timestamp": "2026-10-30T20:10:12Z"
+      },
+      {
         "version": "1.2.2.0",
         "changelog": "- The panel says plainly that the player draws ASS subtitles itself, so a change shows after Save and Reload subtitles.",
         "targetAbi": "12.3.0.0",
