@@ -6,10 +6,10 @@ version's changelog.
 
 ## 1.3.0.0
 
-- Change the times of an existing line: the pencil next to a line's times opens the Add line form for that line. Works
+- New: change the times of an existing line: the pencil next to a line's times opens the Add line form for that line. Works
   for SRT, WebVTT and ASS/SSA; only the two times change, everything else on the line stays. Users who submit changes
   for review can suggest new times too.
-- Fixed: with "Original + last N saves", many saves of one subtitle within the same millisecond, or after the server
+- Fix: with "Original + last N saves", many saves of one subtitle within the same millisecond, or after the server
   clock went back, could prune the newest backup instead of an older one.
 
 ## 1.2.2.0
