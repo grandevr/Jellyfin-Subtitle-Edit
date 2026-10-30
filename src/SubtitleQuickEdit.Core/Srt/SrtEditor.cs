@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using SubtitleQuickEdit.Core.Subtitles;
 
 namespace SubtitleQuickEdit.Core.Srt;
@@ -173,6 +174,58 @@ internal static class SrtEditor
 
         var edited = textEdits.Keys.OrderBy(p => p).Select(p => newPositionOfOriginal[p - 1]).ToList();
         return new SubtitleApplyResult(content, SubtitleHash.Compute(content), addedPositions, edited);
+    }
+
+    internal static SubtitleApplyResult Compose(IReadOnlyList<SubtitleAddCue> cues, long? runtimeMs)
+    {
+        if (cues.Count == 0)
+        {
+            throw new SubtitleEditException(SubtitleEditError.InvalidEdit, "A new subtitle needs at least one line.");
+        }
+
+        const string eol = "\r\n";
+        var clientIds = new HashSet<string>(StringComparer.Ordinal);
+        var lines = new List<(SubtitleAddCue Cue, string Text, int Order)>();
+        foreach (SubtitleAddCue add in cues)
+        {
+            lines.Add((add, CueRules.ForAdd(add, () => CheckAdd(add, runtimeMs, clientIds)), lines.Count));
+        }
+
+        var positions = new Dictionary<string, int>(StringComparer.Ordinal);
+        var expected = new List<(long Start, long End, string Text)>();
+        var text = new StringBuilder();
+        foreach ((SubtitleAddCue cue, string body, int _) in lines.OrderBy(l => l.Cue.StartMs).ThenBy(l => l.Order))
+        {
+            int number = expected.Count + 1;
+            positions[cue.ClientId] = number;
+            expected.Add((cue.StartMs, cue.EndMs, body));
+            text.Append(number.ToString(CultureInfo.InvariantCulture)).Append(eol)
+                .Append(SrtDocument.FormatTime(cue.StartMs)).Append(" --> ").Append(SrtDocument.FormatTime(cue.EndMs)).Append(eol)
+                .Append(body.Replace("\n", eol, StringComparison.Ordinal)).Append(eol).Append(eol);
+        }
+
+        byte[] content = new UTF8Encoding(false).GetBytes(text.ToString());
+        SrtParseResult parsed = SrtParser.Parse(content);
+        if (parsed.Document is null || parsed.Document.Cues.Count != expected.Count)
+        {
+            throw new SubtitleEditException(
+                SubtitleEditError.VerificationFailed,
+                "The new file would not have the expected lines (this can happen when a line's text ends in a bare number). Nothing was made.");
+        }
+
+        for (int i = 0; i < expected.Count; i++)
+        {
+            SubtitleCue cue = parsed.Document.Cues[i];
+            if (cue.StartMs != expected[i].Start || cue.EndMs != expected[i].End || !string.Equals(cue.Text, expected[i].Text, StringComparison.Ordinal))
+            {
+                throw new SubtitleEditException(
+                    SubtitleEditError.VerificationFailed,
+                    string.Create(CultureInfo.InvariantCulture, $"Line {i + 1} would not read back as expected. Nothing was made."),
+                    i + 1);
+            }
+        }
+
+        return new SubtitleApplyResult(content, SubtitleHash.Compute(content), positions, Array.Empty<int>());
     }
 
     /// <summary>

@@ -3,10 +3,16 @@ using System;
 namespace SubtitleQuickEdit.Core.Extraction;
 
 /// <summary>
-/// A subtitle file that the plugin created from an embedded track. Stored as one JSON file.
+/// A subtitle file that the plugin created: from an embedded track, or a new track written from scratch in the editor.
+/// Stored as one JSON file.
 /// </summary>
 public sealed record ExtractedFile
 {
+    /// <summary>
+    /// The <see cref="SourceStreamIndex"/> of a new track written from scratch: it was not extracted from any stream.
+    /// </summary>
+    public const int NewTrack = -1;
+
     /// <summary>
     /// Gets the record id: 32 lowercase hex characters.
     /// </summary>
@@ -18,7 +24,7 @@ public sealed record ExtractedFile
     public required string ItemId { get; init; }
 
     /// <summary>
-    /// Gets the index of the embedded stream it was extracted from.
+    /// Gets the index of the embedded stream it was extracted from, or <see cref="NewTrack"/>.
     /// </summary>
     public int SourceStreamIndex { get; init; }
 

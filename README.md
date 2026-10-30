@@ -55,6 +55,12 @@ When the subtitle is a track inside the video, the button reads **Make this subt
 track as a file next to the video (in its own format for ASS/SSA, as `.srt` for other text tracks) and restarts
 playback on it. Picture-based tracks (PGS, VobSub) cannot be edited.
 
+With no subtitle on (or one that cannot be edited), the button is still there for users who may save directly, and
+offers **Start new track**: choose a language for the file name, add lines with **+ Add line**, and the first Save
+writes them to a new `.srt` file next to the video and restarts playback on it. Nothing is written before that first
+Save. The panel also offers the item's subtitles that can be edited. Users who submit for review get the button only
+on a subtitle they can work on.
+
 If the file changed on disk since it was loaded (another user, a subtitle downloader), Save writes nothing and says
 which changes no longer fit.
 

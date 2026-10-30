@@ -28,6 +28,8 @@ window.subs = [
 window.copies = location.search.indexOf('copies=0') >= 0 ? [] : [
   { id: 'x1', itemId: 'i1', itemName: 'Show S01E01 Pilot', sourceStreamIndex: 2, fileName: 'Pilot.en.srt', streamIndex: 5, exists: true,
     edited: true, replaced: false, userId: 'u2', userName: '<b>testuser</b>', created: '2026-10-25T02:00:00Z' },
+  { id: 'x2', itemId: 'i1', itemName: 'Show S01E01 Pilot', sourceStreamIndex: -1, fileName: 'Pilot.pl.srt', streamIndex: 6, exists: true,
+    edited: false, replaced: false, userId: 'u1', userName: 'admin', created: '2026-10-29T20:00:00Z' },
 ];
 function copy(x) { return JSON.parse(JSON.stringify(x)); }
 window.Dashboard = { showLoadingMsg() {}, hideLoadingMsg() {}, processPluginConfigurationUpdateResult() { window.savedOk = true; } };
@@ -139,6 +141,9 @@ const html = '<html><head><meta charset="utf-8"></head><body><script>' + mock + 
     (await p.$eval('[data-extracted-id="x1"] .sqe-sub-meta', (e) => e.textContent)).indexOf('<b>testuser</b>') === 0 &&
     (await p.$eval('[data-extracted-id="x1"] .sqe-sub-meta', (e) => e.textContent)).indexOf('edited since') >= 0 &&
     !(await p.$('[data-extracted-id="x1"] b'));
+  checks['copies: a copy and a new track say which they are'] =
+    (await p.$eval('[data-extracted-id="x1"] .sqe-sub-meta', (e) => e.textContent)).indexOf('a copy of a track inside the video') >= 0 &&
+    (await p.$eval('[data-extracted-id="x2"] .sqe-sub-meta', (e) => e.textContent)).indexOf('a new track') >= 0;
   await p.click('[data-extracted-id="x1"] .sqe-delete-copy');
   checks['copies: Delete asks for a second click'] = (await p.evaluate(() => window.sent.length)) === 0 &&
     (await p.$eval('[data-extracted-id="x1"] .sqe-delete-copy', (e) => e.textContent)) === 'Click again to delete';
