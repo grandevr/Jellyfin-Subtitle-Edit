@@ -4,6 +4,13 @@ Jellyfin shows versions with four numbers; the plugin's folder is named after it
 Release workflow copies the section of the version it releases (rename "Unreleased" to the version when bumping it) into `manifest.json`, so Jellyfin shows it as the
 version's changelog.
 
+## Unreleased
+
+- New: start a new subtitle track from scratch. For users who may save directly, the edit button is always in the
+  player, also with subtitles off, and shows as soon as the player's controls do. With no editable subtitle on, the
+  panel offers a new track (with a language for its name); the first Save writes `{video}[.{language}].srt` next to the
+  video and restarts playback on it. Admins see these files with the editable copies in the settings page.
+
 ## 1.3.0.0
 
 - New: change the times of an existing line: the pencil next to a line's times opens the Add line form for that line. Works

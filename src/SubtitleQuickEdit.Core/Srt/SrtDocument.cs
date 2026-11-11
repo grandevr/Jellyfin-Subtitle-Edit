@@ -93,6 +93,20 @@ public sealed class SrtDocument : ISubtitleDocument
     }
 
     /// <summary>
+    /// Writes a new .srt file from scratch: UTF-8 without a BOM, <c>\r\n</c> line endings, the lines in start order and
+    /// numbered from 1. Each line gets the same checks as a line added to an existing file.
+    /// </summary>
+    /// <param name="cues">The lines; at least one.</param>
+    /// <param name="runtimeMs">The item's runtime in milliseconds; no line may end after it. Null skips the check.</param>
+    /// <returns>The content, and each line's number by its client id.</returns>
+    /// <exception cref="SubtitleEditException">A line is invalid, or there is none. Nothing was made.</exception>
+    public static SubtitleApplyResult Compose(IReadOnlyList<SubtitleAddCue> cues, long? runtimeMs = null)
+    {
+        ArgumentNullException.ThrowIfNull(cues);
+        return SrtEditor.Compose(cues, runtimeMs);
+    }
+
+    /// <summary>
     /// Formats a time as <c>hh:mm:ss,mmm</c>.
     /// </summary>
     /// <param name="ms">Milliseconds.</param>

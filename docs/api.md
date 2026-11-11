@@ -14,7 +14,9 @@ Every error answer has the shape `{ "code", "message", "cueIndex"?, "currentHash
 | `POST Items/{itemId}/Subtitles/{streamIndex}/Submissions` | submitters | the stored submission (below) |
 | `GET Items/{itemId}/Subtitles/{streamIndex}/Extract` | editors and submitters | preview: `fileName`, `format`, `cueCount`, `exists`, `existingHash`, `existingStreamIndex`, `existingIsExtracted`, `canReplace`, and for admins when a file exists `cues` and `existingCues` |
 | `POST Items/{itemId}/Subtitles/{streamIndex}/Extract` | editors and submitters; replacing: admins | `fileName`, `hash`, `replaced`, `streamIndex` (null while the library refresh runs), `refreshPending` |
-| `GET Extracted` | admins | the files made from embedded tracks, newest first: `id`, `itemId`, `itemName`, `sourceStreamIndex`, `fileName`, `streamIndex`, `exists`, `edited`, `replaced`, `userId`, `userName`, `created` |
+| `GET Items/{itemId}/Subtitles/New?language=` | editors | preview of a new track: `fileName`, `language` (the code in the name, or null), `exists`, `existingStreamIndex` |
+| `POST Items/{itemId}/Subtitles/New` | editors | `fileName`, `hash`, `addedCues` (client id to position), `streamIndex` (null while the library refresh runs), `refreshPending` |
+| `GET Extracted` | admins | the files made from embedded tracks and the new tracks, newest first (`sourceStreamIndex` is -1 for a new track): `id`, `itemId`, `itemName`, `sourceStreamIndex`, `fileName`, `streamIndex`, `exists`, `edited`, `replaced`, `userId`, `userName`, `created` |
 | `DELETE Extracted/{id}` | admins | `fileName`, `backedUp` |
 | `GET Submissions/Mine` | anyone signed in | the caller's own submissions, newest first, in every state |
 | `POST Submissions/{id}/Withdraw` | the submitter, while pending (also with submissions off) | the submission, now `Withdrawn` |
@@ -49,6 +51,14 @@ kept as `…_replaced.srt` in the backups. Each extraction is recorded in `data/
 `DELETE Extracted/{id}` keeps the file's last content as `…_deleted.srt` and refreshes the item. A user who is not an
 admin gets an activity log entry for each extraction. Extra codes: 400 `AlreadyExternal` / `NotExtractable` (picture
 track, not a local video); 413 `TooLarge`; 422 `NotEditable`; 404 `ExtractedNotFound`; 500 `ExtractFailed`.
+
+New track body: `{ "language"?, "edits": [ {"type":"add","clientId","startMs","endMs","text"}, ... ] }`. A new track is
+written from scratch in the panel and becomes `{video name}[.{language}].srt` next to the video (the language code as
+for an extraction, no flags), UTF-8 without a BOM with CRLF line endings, its lines in start order and numbered from 1.
+The lines get the same checks as added lines, and at least one is needed, so an empty file is never made. A file of
+that name is never overwritten (409 `FileExists`). The file is recorded with the extractions (so admins can list and
+delete it), a user who is not an admin gets an activity log entry, and the item is refreshed. Extra codes: 400
+`NotLocal` (not a local video, or its name is too long), `InvalidEdit` (an edit that is not an add).
 
 Edits body: `{ "baseHash", "edits": [ {"type":"edit","cueIndex","oldText","newText","startMs"?,"endMs"?} | {"type":"add","clientId","startMs","endMs","text"} ], "keepRestorePoint"? }`.
 An `edit` with `startMs` and `endMs` also gives the line new times (both or neither; send `oldText` as `newText` to change

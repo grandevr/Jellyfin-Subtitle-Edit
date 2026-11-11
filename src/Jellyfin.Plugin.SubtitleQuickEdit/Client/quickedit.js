@@ -31,6 +31,11 @@
     const SEEK_INSIDE_MS = 200; // Previous, Next and a row click seek this far into a line, so the player shows that line
     const PREVIEW_LEAD_MS = 1000; // Preview starts this long before the new line
     const TOAST_MS = 8000; // how long a message outside the panel stays
+    const NEW_TRACK = 'new'; // the stream index a new track stands under (drafts, staged lines) until its first Save
+    // The languages offered for a new track, as the two-letter codes that go in the file name. The user's own subtitle
+    // language is added when it is not here.
+    const NEW_TRACK_LANGUAGES = ['en', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'pl', 'sv', 'da', 'no', 'fi', 'cs', 'sk', 'hu',
+        'ro', 'bg', 'el', 'ru', 'uk', 'tr', 'ar', 'he', 'hi', 'ja', 'ko', 'zh', 'th', 'vi', 'id'];
     const LOG = '[SubtitleQuickEdit]';
 
     const L = window.SqeLogic;
@@ -365,6 +370,10 @@
             return 'Make this subtitle editable';
         }
 
+        if (!state.target && state.mode === 'edit') {
+            return 'Edit subtitles or start a new track';
+        }
+
         return state.mode === 'submit' ? 'Suggest a subtitle fix' : 'Edit subtitle line';
     }
 
@@ -406,7 +415,7 @@
     }
 
     function updateButton() {
-        if (!state.target || !state.video) {
+        if (!state.video || !L.showsEditButton(state.mode, Boolean(state.target))) {
             removeButtons(null);
             return;
         }
@@ -681,6 +690,10 @@
 
     /** What a staging note says: shown in the player, unless the player draws the subtitle itself (ASS). */
     function stagedNote(what) {
+        if (state.panel && state.panel.target && state.panel.target.isNew) {
+            return what + '. Save writes the new subtitle file; the player shows it after that.';
+        }
+
         return subtitleRenderer() === 'none'
             ? what + '. The player draws ASS subtitles itself, so it keeps showing the old text for now: Save, then ' +
                 'Reload subtitles, to see the change.'
@@ -908,8 +921,8 @@
 
     /** The panel's main button: Save, or Submit for review. */
     function primaryAction() {
-        if (state.panel && state.panel.extracting) {
-            return; // the make-a-copy view has its own buttons
+        if (state.panel && (state.panel.extracting || state.panel.choosing)) {
+            return; // the make-a-copy and new-track views have their own buttons
         }
 
         if (state.panel && state.panel.submitting) {
@@ -970,9 +983,15 @@
         panel.form = null;
         panel.shown = shown.cues;
         panel.nav.hidden = false;
-        panel.actions.hidden = shown.cues.length === 0;
+        const isNew = Boolean(panel.target && panel.target.isNew);
+        panel.actions.hidden = shown.cues.length === 0 && !isNew;
         if (shown.cues.length === 0) {
-            showStatus('This subtitle has no lines.');
+            showStatus(!isNew ? 'This subtitle has no lines.'
+                : note || 'Press + Add line to add a line at the current time. Save writes the lines to “' + panel.target.fileName + '”.');
+            if (isNew) {
+                panel.nav.querySelector('.sqe-add').focus(); // keeps the keys (Ctrl+S) in the panel
+            }
+
             return;
         }
 
@@ -1579,7 +1598,7 @@
 
     /** True when there is something to revert: unsaved changes, or a file that differs from the session's original. */
     function canRevert(panel) {
-        if (!panel.model || !panel.loaded) {
+        if (!panel.model || !panel.loaded || panel.target.isNew) {
             return false;
         }
 
@@ -1633,6 +1652,11 @@
     function saveChanges() {
         const panel = state.panel;
         if (!panel || !panel.model || panel.busy) {
+            return;
+        }
+
+        if (panel.target.isNew) {
+            createTrack();
             return;
         }
 
@@ -2155,7 +2179,16 @@
             }
 
             if (!state.target) {
-                showStatus('The subtitle on screen cannot be edited here (only .srt, .vtt, .ass and .ssa files, and text tracks inside the video, can).', true);
+                const s = state.session;
+                if (state.mode !== 'edit' || !s) {
+                    showStatus(s ? 'The subtitle on screen cannot be edited here (only .srt, .vtt, .ass and .ssa files, and text tracks inside the video, can).'
+                        : 'Could not tell which video is playing. Close this and try again in a moment.', true);
+                } else if (!sameId(s.mediaSourceId, s.itemId)) {
+                    showStatus('This is another version of the video, and only the main version can get a subtitle file here.', true);
+                } else {
+                    return showNewTrack(activeStreamIndex() === null ? '' : 'The subtitle on screen cannot be edited here.');
+                }
+
                 return null;
             }
 
@@ -2433,6 +2466,261 @@
         }, TOAST_MS);
     }
 
+    // ---- a new subtitle track, written from scratch ------------------------------------------------------------------
+    // No file is made until the first Save, so there are never empty subtitle files: until then the lines are staged
+    // (and kept as a draft) under the stream index NEW_TRACK.
+
+    function newTrackPath(itemId) {
+        return 'SubtitleQuickEdit/Items/' + encodeURIComponent(itemId) + '/Subtitles/New';
+    }
+
+    /** A language code in words, in the browser's language ("English"); the code itself when that is not known. */
+    function languageName(code) {
+        try {
+            const names = new Intl.DisplayNames([navigator.language || 'en'], { type: 'language' });
+            const name = names.of(code);
+            return name && name !== code ? name : code;
+        } catch (e) {
+            return code;
+        }
+    }
+
+    /** The user's own subtitle language from their Jellyfin settings, or '' when they have none. */
+    function preferredLanguage() {
+        const client = window.ApiClient;
+        if (!client || typeof client.getCurrentUser !== 'function') {
+            return Promise.resolve('');
+        }
+
+        return Promise.resolve(client.getCurrentUser()).then(function (user) {
+            const pref = user && user.Configuration && user.Configuration.SubtitleLanguagePreference;
+            return typeof pref === 'string' ? pref : '';
+        }, function () {
+            return '';
+        });
+    }
+
+    /**
+     * When no subtitle that can be edited is on: offers to start a new track (with a language for its file name), and
+     * to switch to a subtitle of the item that can be edited.
+     */
+    function showNewTrack(note) {
+        const panel = state.panel;
+        const session = state.session;
+        if (!panel || !session) {
+            return Promise.resolve();
+        }
+
+        panel.choosing = true;
+        panel.title.textContent = 'New subtitle track';
+        panel.nav.hidden = true;
+        panel.actions.hidden = true;
+        panel.tags.hidden = true;
+        panel.cues.textContent = '';
+        const box = panel.extract;
+        box.textContent = '';
+        box.hidden = false;
+        showStatus((note ? note + ' ' : 'No subtitle is on. ') + 'You can start a new one for this video.');
+        box.appendChild(el('p', 'sqe-extract-intro', 'Add the lines with + Add line, and Save writes them to a new subtitle ' +
+            'file next to the video. Nothing is written before that, and the video itself is not changed.'));
+        const field = el('div', 'sqe-field');
+        const caption = el('label', 'sqe-label', 'Language');
+        const select = el('select', 'sqe-new-language');
+        select.id = 'sqe-new-language';
+        caption.htmlFor = select.id;
+        function addOption(code) {
+            const option = el('option', null, code ? languageName(code) : 'No language');
+            option.value = code;
+            select.appendChild(option);
+            return option;
+        }
+
+        addOption('');
+        NEW_TRACK_LANGUAGES.forEach(addOption);
+        field.appendChild(caption);
+        field.appendChild(select);
+        box.appendChild(field);
+        const what = el('p', 'sqe-extract-what', 'Checking the file name…');
+        box.appendChild(what);
+        const buttons = el('div', 'sqe-extract-actions');
+        let preview = null;
+        const start = button('sqe-start-new sqe-primary', 'Start new track', 'Add lines, then Save makes the file', function () {
+            if (preview && !preview.exists) {
+                startNewTrack(preview.language, preview.fileName);
+            }
+        });
+        start.disabled = true;
+        buttons.appendChild(start);
+        const switchExisting = button('sqe-switch-existing', 'Switch to that file', 'Show that file, then edit it', function () {
+            if (preview && typeof preview.existingStreamIndex === 'number') {
+                switchTo(preview.existingStreamIndex, '');
+            }
+        });
+        switchExisting.hidden = true;
+        buttons.appendChild(switchExisting);
+        box.appendChild(buttons);
+        const others = el('div', 'sqe-extract-actions sqe-other-tracks');
+        box.appendChild(others);
+
+        const seq = state.playbackSeq;
+        let asked = 0;
+        function check(language) {
+            const mine = ++asked;
+            start.disabled = true;
+            switchExisting.hidden = true;
+            return apiGet(newTrackPath(session.itemId), { language: language }).then(function (answer) {
+                if (state.panel !== panel || !panel.choosing || mine !== asked) {
+                    return;
+                }
+
+                preview = answer;
+                const code = answer.language || '';
+                if (!Array.prototype.some.call(select.options, function (o) {
+                    return o.value === code;
+                })) {
+                    addOption(code);
+                }
+
+                select.value = code;
+                if (answer.exists) {
+                    const index = typeof answer.existingStreamIndex === 'number';
+                    what.textContent = 'A subtitle file named “' + answer.fileName + '” is already next to the video' +
+                        (index ? ': switch to it, or choose another language.' : '. Choose another language.');
+                    switchExisting.hidden = !index;
+                } else {
+                    what.textContent = 'The new file will be “' + answer.fileName + '”.';
+                    start.disabled = false;
+                }
+            }, function (err) {
+                return describeError(err).then(function (message) {
+                    if (state.panel === panel && mine === asked) {
+                        what.textContent = 'Could not check the file name: ' + message;
+                    }
+                });
+            });
+        }
+
+        select.addEventListener('change', function () {
+            check(select.value);
+        });
+
+        // The subtitles of this item that can be edited: one of them may be what the user wanted.
+        subtitleList(session.itemId).then(function (list) {
+            if (state.panel !== panel || seq !== state.playbackSeq) {
+                return;
+            }
+
+            (list || []).filter(function (t) {
+                return t.editable;
+            }).forEach(function (t) {
+                const name = (t.title || (t.language ? languageName(String(t.language).toLowerCase()) : 'Subtitle')) +
+                    (t.format ? ' (' + t.format + ')' : '');
+                others.appendChild(button('sqe-switch-track', 'Edit ' + name + ' instead', 'Show that subtitle, then edit it', function () {
+                    switchTo(t.streamIndex, '');
+                }));
+            });
+        }, function () {
+            // The list is a convenience; starting a new track does not need it.
+        });
+
+        return preferredLanguage().then(check);
+    }
+
+    /** Leaves the new-track view for the editor, with no lines yet (or the ones kept from before). */
+    function startNewTrack(language, fileName) {
+        const panel = state.panel;
+        const session = state.session;
+        if (!panel || !session) {
+            return;
+        }
+
+        panel.choosing = false;
+        panel.extract.hidden = true;
+        panel.title.textContent = 'New subtitle track';
+        const target = { itemId: session.itemId, streamIndex: NEW_TRACK, isNew: true, language: language || null, fileName: fileName };
+        const loaded = { hash: null, encoding: 'utf-8', format: 'srt', timePrecisionMs: 1, cues: [] };
+        panel.target = target;
+        panel.loaded = loaded;
+        const made = modelFor(target, loaded);
+        panel.model = made.model;
+        panel.actions.querySelector('.sqe-reload').hidden = true;
+        renderChanges();
+        renderCues({ mode: 'active', cues: [] }, made.restored === null ? undefined : made.restored);
+    }
+
+    /** The first Save of a new track: makes the file with every staged line, then shows it in the player. */
+    function createTrack() {
+        const panel = state.panel;
+        if (!applyCurrent(true)) {
+            return;
+        }
+
+        const model = panel.model;
+        const target = panel.target;
+        const prepared = model.prepareNewTrack(target.language);
+        if (!prepared) {
+            showStatus('Add a line first: press + Add line.');
+            return;
+        }
+
+        setBusy(true);
+        showStatus('Making “' + target.fileName + '”…');
+        apiPost(newTrackPath(target.itemId), prepared.request).then(function (made) {
+            model.applySaveSuccess(prepared.rowIds, made);
+            // The lines are in the file now: the next edits go to that track, under its own stream index.
+            delete state.tracks[target.itemId];
+            delete state.models[cacheKey(target)];
+            drafts.remove(state.userId, target.itemId, target.streamIndex);
+            if (state.panel !== panel) {
+                return;
+            }
+
+            renderChanges();
+            panel.nav.hidden = true;
+            panel.actions.hidden = true;
+            panel.cues.textContent = '';
+            const count = prepared.rowIds.length;
+            const done = 'Made “' + made.fileName + '” with ' + count + (count === 1 ? ' line.' : ' lines.');
+            if (typeof made.streamIndex === 'number') {
+                switchTo(made.streamIndex, done);
+            } else {
+                showStatus(done + ' Jellyfin is still adding it: in a minute, stop and start the video and choose it in the subtitle menu.');
+            }
+        }, function (err) {
+            return errorDetails(err).then(function (details) {
+                const code = details.body && details.body.code;
+                if (details.status === 409 && code === 'FileExists') {
+                    // Someone made a file of that name meanwhile: the lines stay staged, and the name is checked again.
+                    persist(target, model);
+                    if (state.panel === panel) {
+                        setBusy(false);
+                        showNewTrack('A file named “' + target.fileName + '” was made meanwhile, so nothing was saved.');
+                    }
+
+                    return;
+                }
+
+                const outcome = model.applySaveError(prepared.rowIds, details.status, details.body);
+                persist(target, model);
+                if (state.panel === panel) {
+                    setBusy(false);
+                    reshow();
+                    showStatus(outcome.action === 'marked' ? 'Nothing was saved: a line was refused (see the list).'
+                        : 'Nothing was saved: ' + outcome.message, true);
+                }
+            });
+        }).catch(function (err) {
+            if (state.panel === panel) {
+                setBusy(false);
+                return describeError(err).then(function (message) {
+                    showStatus('Something went wrong after saving: ' + message, true);
+                });
+            }
+
+            return null;
+        });
+    }
+
     // ---- keys: while the panel has focus, no key reaches the player -------------------------------------------------
     // Registered at load, before jellyfin-web's bundles run (they are deferred), so this listener runs first.
 
@@ -2509,9 +2797,11 @@
         }
 
         if (state.mode && !state.sessionTried) {
-            // At the start of a playback, or when the rights check finished after playback started.
+            // At the start of a playback, or when the rights check finished after playback started. The button does
+            // not wait for it when it does not need a subtitle (see L.showsEditButton).
             state.sessionTried = true;
             loadSession(state.playbackSeq, 0);
+            updateButton();
             return;
         }
 

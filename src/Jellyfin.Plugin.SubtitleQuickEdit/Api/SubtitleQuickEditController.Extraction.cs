@@ -189,7 +189,7 @@ public partial class SubtitleQuickEditController
 
         if (!rights.IsAdmin)
         {
-            await AnnounceExtractAsync(rights, item, Path.GetFileName(result.Record.Path)).ConfigureAwait(false);
+            await AnnounceMadeFileAsync(rights, item, Path.GetFileName(result.Record.Path), "made an editable copy of a subtitle track").ConfigureAwait(false);
         }
 
         int? newIndex = null;
@@ -443,15 +443,15 @@ public partial class SubtitleQuickEditController
     }
 
     /// <summary>
-    /// Adds an entry to Jellyfin's activity log when a user who is not an admin made an editable copy, so admins see
-    /// it. A failure is logged and otherwise ignored: the file is already written.
+    /// Adds an entry to Jellyfin's activity log when a user who is not an admin made a subtitle file (an editable copy
+    /// or a new track), so admins see it. A failure is logged and otherwise ignored: the file is already written.
     /// </summary>
-    private async Task AnnounceExtractAsync(EditorRights rights, BaseItem item, string fileName)
+    private async Task AnnounceMadeFileAsync(EditorRights rights, BaseItem item, string fileName, string what)
     {
         try
         {
             var entry = new ActivityLog(
-                string.Create(CultureInfo.InvariantCulture, $"{rights.UserName} made an editable copy of a subtitle track"),
+                string.Create(CultureInfo.InvariantCulture, $"{rights.UserName} {what}"),
                 "SubtitleQuickEditExtract",
                 rights.User!.Id)
             {
@@ -465,7 +465,7 @@ public partial class SubtitleQuickEditController
         catch (Exception ex)
         {
             // The activity log is a courtesy; any failure there must not fail the extraction.
-            logger.LogWarning(ex, "Subtitle Editor could not add the extraction to the activity log.");
+            logger.LogWarning(ex, "Subtitle Editor could not add a new subtitle file to the activity log.");
         }
     }
 }

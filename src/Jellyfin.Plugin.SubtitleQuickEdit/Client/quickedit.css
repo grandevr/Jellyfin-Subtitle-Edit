@@ -468,6 +468,23 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
     outline-offset: 0;
 }
 
+/* The language of a new subtitle track. */
+.sqe-new-language {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 8px 6px;
+    border: 1px solid var(--sqe-line);
+    border-radius: 6px;
+    background: var(--sqe-field);
+    color: var(--sqe-fg);
+    font: inherit;
+}
+
+.sqe-new-language:focus {
+    outline: 2px solid var(--sqe-accent);
+    outline-offset: 0;
+}
+
 .sqe-time-row .sqe-button {
     flex: none;
     padding: 8px 6px;
@@ -490,6 +507,7 @@ body.mouseIdle .sqe-edit-button.sqe-floating {
 @media (pointer: coarse), (max-width: 600px) {
     .sqe-button,
     .sqe-time,
+    .sqe-new-language,
     .sqe-close {
         min-height: 44px;
     }
